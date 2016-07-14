@@ -41,13 +41,15 @@ from collections import defaultdict
 import matplotlib.gridspec as gridspec
 import MySQLdb
 import csv
+from pandas import DataFrame
 
-Script = os.path.basename(__file__)
+
+#Script = os.path.basename(__file__)
 Date = datetime.date.today()
 
 # Site ID
-Leg = '311'
-Site = '1327'
+Leg = "'311'"
+Site = "'1325'"
 Hole = "('C')"
 Solute = 'Mg'
 
@@ -55,11 +57,6 @@ Solute = 'Mg'
 timesteps = 1000  # Number of timesteps
 intervals = 51  # Number of intervals
 smoothing = 1  # Data points to use for smoothing modelrate profile
-
-# Site parameters
-advection = 0  # external advection rate (at seafloor) (m/y) Negative is upward
-bottomtemp = 2.66  # bottom water temperature (C)
-tempgradient = 0.059  # geothermal gradient (C/m)
 
 # Species parameters
 Ds = 1.875*10**-2  # m^2 per year free diffusion coefficient at 18C
@@ -78,50 +75,47 @@ conctable = 'iw_100_312'
 portable = 'mad_100_312'
 con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
 
-####### Create data files from database#######
-# Pore water data
-con.query("SELECT sample_depth, {} FROM {} where leg = {} and site = {} and hole in {} and {} is not null;".format(Solute, conctable, Leg, Site, Hole, Solute))
-datapull = con.store_result()
-data = datapull.fetch_row(maxrows=0, how=0)
-with open('conc.csv', 'w') as f:
-    writer = csv.writer(f)
-    writer.writerows(data)
-
-# Porosity data
-con.query("SELECT sample_depth, porosity FROM {} where leg = {} and site = {} and hole in {} and method like('%C') and {} is not null ;".format(portable, Leg, Site, Hole, 'porosity'))
-datapull = con.store_result()
-data = datapull.fetch_row(maxrows=0, how=0)
-with open('por.csv', 'w') as f:
-    writer = csv.writer(f)
-    writer.writerows(data)
-
-# Sea level data for salinity
-con.query("SELECT age, sealevel FROM sealevel")
-datapull = con.store_result()
-data = datapull.fetch_row(maxrows=0, how=0)
-with open('sea_level.csv', 'w') as f:
-    writer = csv.writer(f)
-    writer.writerows(data)
-
-####### Load Files ########
-# Current concentration profile (mM or mol m**-3)
-concdata = pd.read_csv(r'C:\Users\rickdberg\Documents\GitHub\magnesium\conc.csv', sep=",", header=None, skiprows=None)
+####### Import data from database #######
+# Pore water chemistry data
+sql = "SELECT sample_depth, {} FROM {} where leg = {} and site = {} and hole in {} and {} is not null; ".format(Solute, conctable, Leg, Site, Hole, Solute)
+concdata = pd.read_sql(sql, con)
 concdata = concdata.as_matrix()
 ct0 = [concdata[0, 1]]  # mol per m^3 in modern average seawater
 
-# Porosity profile
-pordata = pd.read_csv(r'C:\Users\rickdberg\Documents\GitHub\magnesium\por.csv', sep=",", header=None, skiprows=None)
+# Porosity data
+sql = "SELECT sample_depth, porosity FROM {} where leg = {} and site = {} and hole in {} and method like('%C') and {} is not null ;".format(portable, Leg, Site, Hole, 'porosity')
+pordata = pd.read_sql(sql, con)
 pordata = pordata.as_matrix()
 
-#Salinity record
-salinity = pd.read_csv(r'C:\Users\rickdberg\Documents\GitHub\magnesium\sea_level.csv', sep=',', header=None, skiprows=None)
+# Sea level data for salinity
+sql = "SELECT age, sealevel FROM sealevel"
+salinity = pd.read_sql(sql, con)
 salinity = salinity.as_matrix()
 salinityval = (salinity[:,1]+3900)/3900*34.7
 salinity = np.column_stack((salinity[:,0], salinityval))
 
+# Temperature gradient
+sql = "SELECT temp_gradient FROM summary_all where leg = {} and site = {} and hole in {} ;".format(Leg, Site, Hole)
+temp_gradient = pd.read_sql(sql, con)
+temp_gradient = temp_gradient.iloc[0,0]
+
+
+#temp_gradient = temp_gradient.as_matrix()
+
+# Bottom water temp
+sql = "SELECT bottom_water_temp FROM summary_all where leg = {} and site = {} and hole in {} ;".format(Leg, Site, Hole)
+bottom_temp = pd.read_sql(sql, con)
+bottom_temp = bottom_temp.iloc[0,0]
+
 # Temperature profile (degrees C)
-def sedtemp(z, bottomtemp):
-    return bottomtemp + np.multiply(z, tempgradient)
+def sedtemp(z, bottom_temp):
+    return bottom_temp + np.multiply(z, temp_gradient)
+
+# Advection rate
+sql = "SELECT advection_rate FROM summary_all where leg = {} and site = {} and hole in {} ;".format(Leg, Site, Hole)
+advection_rate = pd.read_sql(sql, con)
+
+####### Load Files ########
 
 # Sedimentation rate profile (m/y)
 # Note: Input data with no headers
@@ -342,7 +336,7 @@ ax2.plot(por[:, 1], por[:, 0], 'mo', label='Measured')
 ax2.plot(porcurve(pordepth, porfit), pordepth, 'k-', label='Curve fit', linewidth=3)
 ax2.legend(loc='lower right', fontsize='small')
 ax1.legend(loc='lower right', fontsize='small')
-ax3.plot(sedtemp(np.arange(maxconcdepth), bottomtemp), np.arange(maxconcdepth), 'k-', linewidth=3)
+ax3.plot(sedtemp(np.arange(maxconcdepth), bottom_temp), np.arange(maxconcdepth), 'k-', linewidth=3)
 ax1.set_ylabel('Depth (mbsf)')
 ax1.set_xlabel('Concentration (mM)')
 ax2.set_xlabel('Porosity')
@@ -380,7 +374,7 @@ ct = np.interp(iterationtimes, salinity[:,0]*10**6, salinity[:,1])/34.7*ct0
 #Sediment properties
 porosity = porcurve(intervaldepths, porfit)
 tortuosity = 1-np.log(porosity**2)
-Dsed = Dst(TempD, sedtemp(intervaldepths, bottomtemp))/tortuosity  # Effective diffusion coefficient
+Dsed = Dst(TempD, sedtemp(intervaldepths, bottom_temp))/tortuosity  # Effective diffusion coefficient
 
 # Pore water burial flux at each time step
 deeppor = porcurve(pordepth[-1], porfit)
@@ -476,7 +470,7 @@ savefig("rateprofile.png")
 
 
 # Save data in csv files
-metadata = {'Precision': precision, 'Grid Peclet #': gpeclet, 'Courant #': courant, 'Leg': Leg, 'Site': Site, 'Solute': Solute, 'Timesteps': timesteps, 'Number of Intervals': intervals, 'Smoothing Window': smoothing, 'Advection Rate': advection, 'Bottom Temperature': bottomtemp, 'Ds': Ds, 'Ds reference temp': TempD, 'Integrated Rate': integratedrate, 'R-squared': rsquared, 'Script': Script, 'Date': Date}
+metadata = {'Precision': precision, 'Grid Peclet #': gpeclet, 'Courant #': courant, 'Leg': Leg, 'Site': Site, 'Solute': Solute, 'Timesteps': timesteps, 'Number of Intervals': intervals, 'Smoothing Window': smoothing, 'Ds': Ds, 'Ds reference temp': TempD, 'Integrated Rate': integratedrate, 'R-squared': rsquared, 'Script': Script, 'Date': Date}
 metadatadf = Series(metadata)
 metadatadf.to_csv("metadata.csv")
 
