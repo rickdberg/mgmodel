@@ -44,21 +44,22 @@ import csv
 from pandas import DataFrame
 
 
-#Script = os.path.basename(__file__)
+Script = os.path.basename(__file__)
 Date = datetime.date.today()
 
 # Site ID
-Leg = "'311'"
-Site = "'1325'"
-Hole = "('C')"
-Solute = 'Mg'
+Leg = '311'
+Site = '1325'
+Hole = 'C'
+Holes = "('{}')".format(Hole)
 
 # Model parameters
 timesteps = 1000  # Number of timesteps
-intervals = 51  # Number of intervals
+intervals = 55  # Number of intervals
 smoothing = 1  # Data points to use for smoothing modelrate profile
 
 # Species parameters
+Solute = 'Mg'
 Ds = 1.875*10**-2  # m^2 per year free diffusion coefficient at 18C
 TempD = 18  # Temperature at which diffusion coefficient is known
 precision = 0.02  # measurement precision
@@ -77,13 +78,14 @@ con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
 
 ####### Import data from database #######
 # Pore water chemistry data
-sql = "SELECT sample_depth, {} FROM {} where leg = {} and site = {} and hole in {} and {} is not null; ".format(Solute, conctable, Leg, Site, Hole, Solute)
+sql = """SELECT sample_depth, {} FROM {} where leg = '{}' and site = '{}' and hole in {} and {} is not null; """.format(Solute, conctable, Leg, Site, Holes, Solute)
 concdata = pd.read_sql(sql, con)
 concdata = concdata.as_matrix()
 ct0 = [concdata[0, 1]]  # mol per m^3 in modern average seawater
+datapoints = len(concdata)
 
 # Porosity data
-sql = "SELECT sample_depth, porosity FROM {} where leg = {} and site = {} and hole in {} and method like('%C') and {} is not null ;".format(portable, Leg, Site, Hole, 'porosity')
+sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and method like('%C') and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
 pordata = pd.read_sql(sql, con)
 pordata = pordata.as_matrix()
 
@@ -95,15 +97,13 @@ salinityval = (salinity[:,1]+3900)/3900*34.7
 salinity = np.column_stack((salinity[:,0], salinityval))
 
 # Temperature gradient
-sql = "SELECT temp_gradient FROM summary_all where leg = {} and site = {} and hole in {} ;".format(Leg, Site, Hole)
+sql = """SELECT temp_gradient FROM summary_all where leg = '{}' and site = '{}' and hole in {} ;""".format(Leg, Site, Holes)
 temp_gradient = pd.read_sql(sql, con)
 temp_gradient = temp_gradient.iloc[0,0]
 
 
-#temp_gradient = temp_gradient.as_matrix()
-
 # Bottom water temp
-sql = "SELECT bottom_water_temp FROM summary_all where leg = {} and site = {} and hole in {} ;".format(Leg, Site, Hole)
+sql = """SELECT bottom_water_temp FROM summary_all where leg = '{}' and site = '{}' and hole in {} ;""".format(Leg, Site, Holes)
 bottom_temp = pd.read_sql(sql, con)
 bottom_temp = bottom_temp.iloc[0,0]
 
@@ -112,8 +112,9 @@ def sedtemp(z, bottom_temp):
     return bottom_temp + np.multiply(z, temp_gradient)
 
 # Advection rate
-sql = "SELECT advection_rate FROM summary_all where leg = {} and site = {} and hole in {} ;".format(Leg, Site, Hole)
-advection_rate = pd.read_sql(sql, con)
+sql = """SELECT advection_rate FROM summary_all where leg = '{}' and site = '{}' and hole in {} ;""".format(Leg, Site, Holes)
+advection = pd.read_sql(sql, con)
+advection = advection.iloc[0,0]
 
 ####### Load Files ########
 
@@ -347,7 +348,7 @@ ax3.locator_params(axis='x', nbins=4)
 ax1.invert_yaxis()
 ax2.invert_yaxis()
 ax3.invert_yaxis()
-savefig("dataprofiles.png")
+savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output data figures\dataprofiles_{}_{}.png".format(Leg, Site))
 #plt.waitforbuttonpress()
 #plt.close()
 
@@ -412,9 +413,9 @@ plt.gca().invert_yaxis()
 plt.show()
 '''
 # Grid peclet and courant numbers
-gpeclet = np.abs((advection*porosity[0]/porosity[-1]+pwburialflux[0]/porosity[-1])*intervalthickness/np.min(Dsed))
+gpeclet = np.abs((advection*porosity[0]/porosity[-1]+pwburialflux[0]/porosity[-1])*intervalthickness/np.min(Dsed))[0]
 print('Grid Peclet (less than 2):', gpeclet)
-courant = np.abs((advection*porosity[0]/porosity[-1]+pwburialflux[0]/porosity[-1])*dt/intervalthickness)
+courant = np.abs((advection*porosity[0]/porosity[-1]+pwburialflux[0]/porosity[-1])*dt/intervalthickness)[0]
 print('Courant (less than 1):', courant)  
 #neumann = intervalthickness**2/(3*np.max(Dsed))
 #print('Von Neumann (greater than dt):', neumann, 'dt:', dt)
@@ -466,17 +467,13 @@ ax5.set_xlabel('Reaction Rate x 10^-6')
 ax4.locator_params(axis='x', nbins=4)
 ax5.locator_params(axis='x', nbins=4)
 ax4.invert_yaxis()
-savefig("rateprofile.png")
+savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output rate figures\rateprofile_{}_{}.png".format(Leg, Site))
 
 
-# Save data in csv files
-metadata = {'Precision': precision, 'Grid Peclet #': gpeclet, 'Courant #': courant, 'Leg': Leg, 'Site': Site, 'Solute': Solute, 'Timesteps': timesteps, 'Number of Intervals': intervals, 'Smoothing Window': smoothing, 'Ds': Ds, 'Ds reference temp': TempD, 'Integrated Rate': integratedrate, 'R-squared': rsquared, 'Script': Script, 'Date': Date}
-metadatadf = Series(metadata)
-metadatadf.to_csv("metadata.csv")
-
+# Save reaction rate and porosity data in csv files
 modelrxnrates = np.column_stack((modelratesmooth, intervaldepths[1:-1]))
 modelporosity = np.column_stack((intervaldepths, porosity))
-np.savetxt("modelporosity.csv", modelporosity, delimiter="\t")
-np.savetxt("modelrates.csv", modelrxnrates, delimiter="\t")
+np.savetxt(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output porosity data\modelporosity_{}_{}.csv".format(Leg, Site), modelporosity, delimiter="\t")
+np.savetxt(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output rate data\modelrates_{}_{}.csv".format(Leg, Site), modelrxnrates, delimiter="\t")
 
 # eof

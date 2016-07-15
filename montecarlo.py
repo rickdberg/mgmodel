@@ -9,7 +9,7 @@ import numpy as np
 import pylab as pl
 
 # Simulation parameters
-cycles = 1000
+cycles = 10
 relativeerror = 0.02
 
 '''
@@ -54,7 +54,7 @@ for n in range(cycles):
     concsmooth = befconc2*0.06+befconc1*0.24+conc[:]*0.4+aftconc1*0.24+aftconc2*0.06
     
     # Interpolate smoothed profile
-    concinterp = interp1d(concdata[:, 0], concsmooth[:], kind='linear')
+    concinterp = interp1d(concunique[:, 0], concsmooth[:], kind='linear')
     concvalues = concinterp(intervaldepths)
     
     # Run model
@@ -89,8 +89,20 @@ print('Std Dev:', stdev)
 pl.hist(integratedrates, bins=50)
 pl.xlabel("Integrated Rate")
 pl.ylabel("N")
-pl.savefig("montecarlo.png")
+pl.savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output monte carlo distributions\montecarlo_{}_{}.png".format(Leg, Site))
 
+# Connect to database
+user = 'root'
+passwd = 'neogene227'
+host = '127.0.0.1'
+db = 'iodp'
+con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
+cur = con.cursor()
 
+# Save metadata in database
+cur.execute("""select site_key from site_list where leg = '{}' and site = '{}' ;""".format(Leg, Site))
+site_key = cur.fetchone()[0]
+cur.execute("""insert into model_metadata (site_key, leg, site, hole, solute, mean_integrated_rate, median_integrated_rate, model_std_deviation, r_squared, timesteps, number_of_intervals, datapoints, smoothing_window, measurement_precision, grid_peclet, courant, ds, ds_reference_temp, script, run_date) VALUES ({}, {}, {}, '{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, '{}', '{}')  ON DUPLICATE KEY UPDATE hole='{}', solute='{}', mean_integrated_rate={}, median_integrated_rate={}, model_std_deviation={}, r_squared={}, timesteps={}, number_of_intervals={}, datapoints={}, smoothing_window={}, measurement_precision={}, grid_peclet={}, courant={}, ds={}, ds_reference_temp={}, script='{}', run_date='{}' ;""".format(site_key, Leg, Site, Hole, Solute, modelmean, modelmedian, stdev, rsquared, timesteps, intervals, datapoints, smoothing, precision, gpeclet, courant, Ds, TempD, Script, Date, Hole, Solute, modelmean, modelmedian, stdev, rsquared, timesteps, intervals, datapoints, smoothing, precision, gpeclet, courant, Ds, TempD, Script, Date))
+con.commit()
 
 # eof
