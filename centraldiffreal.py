@@ -65,9 +65,11 @@ TempD = 18  # Temperature at which diffusion coefficient is known
 precision = 0.02  # measurement precision
 
 ###############################################################################
-# Load files as pandas dataframes
+###############################################################################
+###############################################################################
+# Load data from database
 
-# Import data from database, create files for loading
+# Connect to database
 user = 'root'
 passwd = 'neogene227'
 host = '127.0.0.1'
@@ -76,7 +78,6 @@ conctable = 'iw_100_312'
 portable = 'mad_100_312'
 con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
 
-####### Import data from database #######
 # Pore water chemistry data
 sql = """SELECT sample_depth, {} FROM {} where leg = '{}' and site = '{}' and hole in {} and {} is not null; """.format(Solute, conctable, Leg, Site, Holes, Solute)
 concdata = pd.read_sql(sql, con)
@@ -101,7 +102,6 @@ sql = """SELECT temp_gradient FROM summary_all where leg = '{}' and site = '{}' 
 temp_gradient = pd.read_sql(sql, con)
 temp_gradient = temp_gradient.iloc[0,0]
 
-
 # Bottom water temp
 sql = """SELECT bottom_water_temp FROM summary_all where leg = '{}' and site = '{}' and hole in {} ;""".format(Leg, Site, Holes)
 bottom_temp = pd.read_sql(sql, con)
@@ -116,16 +116,12 @@ sql = """SELECT advection_rate FROM summary_all where leg = '{}' and site = '{}'
 advection = pd.read_sql(sql, con)
 advection = advection.iloc[0,0]
 
-####### Load Files ########
-
 # Sedimentation rate profile (m/y)
-# Note: Input data with no headers
 # Note: Input data must have time at depth=0
-sed = pd.read_csv(r'C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Working\sedrate.txt', sep="\t", header=None, skiprows=None)
+sql = """SELECT depth, age FROM age_depth where leg = '{}' and site = '{}' order by 1 ;""".format(Leg, Site)
+sed = pd.read_sql(sql, con)
 sed = sed.as_matrix()
 
-###############################################################################
-###############################################################################
 ###############################################################################
 # Average duplicates in concentration and porosity datasets
 

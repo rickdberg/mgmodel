@@ -10,7 +10,7 @@ import pylab as pl
 
 # Simulation parameters
 cycles = 10
-relativeerror = 0.02
+relativeerror = precision
 
 '''
 # Random profile using full gaussian probability
@@ -102,7 +102,20 @@ cur = con.cursor()
 # Save metadata in database
 cur.execute("""select site_key from site_list where leg = '{}' and site = '{}' ;""".format(Leg, Site))
 site_key = cur.fetchone()[0]
-cur.execute("""insert into model_metadata (site_key, leg, site, hole, solute, mean_integrated_rate, median_integrated_rate, model_std_deviation, r_squared, timesteps, number_of_intervals, datapoints, smoothing_window, measurement_precision, grid_peclet, courant, ds, ds_reference_temp, script, run_date) VALUES ({}, {}, {}, '{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, '{}', '{}')  ON DUPLICATE KEY UPDATE hole='{}', solute='{}', mean_integrated_rate={}, median_integrated_rate={}, model_std_deviation={}, r_squared={}, timesteps={}, number_of_intervals={}, datapoints={}, smoothing_window={}, measurement_precision={}, grid_peclet={}, courant={}, ds={}, ds_reference_temp={}, script='{}', run_date='{}' ;""".format(site_key, Leg, Site, Hole, Solute, modelmean, modelmedian, stdev, rsquared, timesteps, intervals, datapoints, smoothing, precision, gpeclet, courant, Ds, TempD, Script, Date, Hole, Solute, modelmean, modelmedian, stdev, rsquared, timesteps, intervals, datapoints, smoothing, precision, gpeclet, courant, Ds, TempD, Script, Date))
+cur.execute("""insert into model_metadata (site_key, leg, site, hole, solute, 
+mean_integrated_rate, median_integrated_rate, model_std_deviation, r_squared, 
+timesteps, number_of_intervals, datapoints, smoothing_window, measurement_precision, 
+monte_carlo_cycles, grid_peclet, courant, ds, ds_reference_temp, script, run_date) 
+VALUES ({}, {}, {}, '{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, 
+{}, '{}', '{}')  ON DUPLICATE KEY UPDATE hole='{}', solute='{}', mean_integrated_rate={}, 
+median_integrated_rate={}, model_std_deviation={}, r_squared={}, timesteps={}, 
+number_of_intervals={}, datapoints={}, smoothing_window={}, measurement_precision={}, 
+monte_carlo_cycles={}, grid_peclet={}, courant={}, ds={}, ds_reference_temp={}, 
+script='{}', run_date='{}' ;""".format(site_key, Leg, Site, Hole, Solute, modelmean, 
+modelmedian, stdev, rsquared, timesteps, intervals, datapoints, smoothing, precision, 
+cycles, gpeclet, courant, Ds, TempD, Script, Date, Hole, Solute, modelmean, modelmedian, 
+stdev, rsquared, timesteps, intervals, datapoints, smoothing, precision, cycles, gpeclet, 
+courant, Ds, TempD, Script, Date))
 con.commit()
 
 # eof
