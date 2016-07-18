@@ -7,6 +7,8 @@ Must run central difference model before running this script
 """
 import numpy as np
 import pylab as pl
+from scipy.interpolate import interp1d
+
 
 # Simulation parameters
 cycles = 10

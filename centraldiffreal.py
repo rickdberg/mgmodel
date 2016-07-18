@@ -6,43 +6,42 @@ Created on Wed Sep 23 16:31:33 2015
 
 Script for modeling reaction rates in marine sediments.
 
-Starts with existing sediment column, 
-sediment column building upward modeled as a downward flow of porewater.
+Starts with existing sediment column, sediment column building upward is 
+modeled as a downward flow of porewater.
 
-Bottom boundary condition set as constant concentration of lowest measured value.
+Bottom boundary condition set as constant concentration of lowest measured 
+value.
+Upper boundary condition set as seawater value adjusted for changing salinity
+based on sealevel records.
 
 Accounts for external flow and sediment/porewater burial and compaction.
 
 Rates are kept constant over the period of sediment column build and are 
-kept constant at specific depths.(Do not follow the sediment packages)
+kept constant at specific depths relative to seafloor.(Do not follow the 
+sediment packages)
 
 Start with the current profile, after each iteration, calculate the
-rate needed to keep the profile there. Then averages those rates and runs the
-model forward to get fit.
+rate needed to keep the profile there. It then averages those rates and runs 
+the model forward to get the fit.
 
 Final rate output is in mol m-3 (bulk sediment) y-1
 (Same as Wang model)
 
-Units used: meters, years, mol m**-3 (aka mM), Celsius. 
-
+Units: meters, years, mol m**-3 (aka mM), Celsius. 
 
 [Column, Row]
 """
-from pylab import savefig
+import numpy as np
+import pandas as pd
+import MySQLdb
 import datetime
 import os
-import numpy as np
 import matplotlib.pyplot as plt
-import pandas as pd
-from pandas import Series
 from scipy.interpolate import interp1d
 from scipy import optimize, integrate
 from collections import defaultdict
 import matplotlib.gridspec as gridspec
-import MySQLdb
-import csv
-from pandas import DataFrame
-
+from pylab import savefig
 
 Script = os.path.basename(__file__)
 Date = datetime.date.today()
@@ -255,7 +254,7 @@ sedtimes = sed[:, 1]
 seddepths = sed[:, 0]
 sedrates = np.diff(seddepths, axis=0)/np.diff(sedtimes, axis=0)  # m/y
 
-# Function for appending float to array and trimming the series to that value
+# Function for appending float to array and trimming the array to that value
 def insertandcut(value, array):
     findindex = array.searchsorted(value)
     sortedarray = np.insert(array, findindex, value)[:findindex+1]
