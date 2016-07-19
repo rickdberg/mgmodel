@@ -38,12 +38,13 @@ while i < cycles:
     offsets.append(offset)
     i = len(offsets)
 
-# Calculate integrated rates for random profiles
+# Calculate integrated rates for random profiles after smoothing randomized 
+# errored data
 integratedrates = []
 for n in range(cycles):
     conc = concunique[:,1] + concunique[:,1]*offsets[n]
     
-    # Concentration smoothing 5-pt gaussian (approximate)
+    # Concentration smoothing 5-pt gaussian (approximate) (Does this handle edges correctly??)
     prepad = [(conc[0]+(conc[0]-conc[2])), (conc[0]+(conc[0]-conc[1]))]
     postpad = [(conc[-1]+(conc[-1]-conc[-2])), (conc[-1]+(conc[-1]-conc[-3]))]
     concpad = np.append(np.append(prepad, conc[:]), postpad)
@@ -59,7 +60,7 @@ for n in range(cycles):
     concinterp = interp1d(concunique[:, 0], concsmooth[:], kind='linear')
     concvalues = concinterp(intervaldepths)
     
-    # Run model
+    # Run model (Check formulation)
     edgevalues = concvalues
     concprofile = []
     modelrates = []
@@ -71,9 +72,8 @@ for n in range(cycles):
         edgevalues = np.append(np.append([ct[i]], edgevalues + modelrate*dt), [cb])
         modelrates.append(modelrate)
 
-
     modelratefinal = np.mean(modelrates, axis=0)
-    integratedrate = sum(modelratefinal*intervalvector)
+    integratedrate = sum(modelratefinal*intervalvector) # Should I use intervalvector??
     integratedrates.append(integratedrate)
 
 

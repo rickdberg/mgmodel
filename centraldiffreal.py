@@ -49,17 +49,17 @@ Date = datetime.date.today()
 # Site ID
 Leg = '311'
 Site = '1325'
-Hole = 'C'
-Holes = "('{}')".format(Hole)
+Holes = "('B','C')"
+Hole = ''.join(filter(str.isalpha, Holes))
 
 # Model parameters
 timesteps = 1000  # Number of timesteps
-intervals = 55  # Number of intervals
+intervals = 55  # Number of intervals (Make automated)
 smoothing = 1  # Data points to use for smoothing modelrate profile
 
 # Species parameters
 Solute = 'Mg'
-Ds = 1.875*10**-2  # m^2 per year free diffusion coefficient at 18C
+Ds = 1.875*10**-2  # m^2 per year free diffusion coefficient at 18C (ref?)
 TempD = 18  # Temperature at which diffusion coefficient is known
 precision = 0.02  # measurement precision
 
@@ -81,8 +81,8 @@ con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
 sql = """SELECT sample_depth, {} FROM {} where leg = '{}' and site = '{}' and hole in {} and {} is not null; """.format(Solute, conctable, Leg, Site, Holes, Solute)
 concdata = pd.read_sql(sql, con)
 concdata = concdata.as_matrix()
-ct0 = [concdata[0, 1]]  # mol per m^3 in modern average seawater
-datapoints = len(concdata)
+ct0 = [concdata[0, 1]]  # mol per m^3 in modern average seawater at specific site
+datapoints = len(concdata) # Used to insert into metadata and set number of intervals
 
 # Porosity data
 sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and method like('%C') and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
@@ -93,25 +93,23 @@ pordata = pordata.as_matrix()
 sql = "SELECT age, sealevel FROM sealevel"
 salinity = pd.read_sql(sql, con)
 salinity = salinity.as_matrix()
-salinityval = (salinity[:,1]+3900)/3900*34.7
-salinity = np.column_stack((salinity[:,0], salinityval))
+salinityval = (salinity[:,1]+3900)/3900*34.7 # Modern day avg salinity 34.7 from (ref), depth of ocean from (ref)
+salinity = np.column_stack((salinity[:,0], salinityval)) # Avg salinity vs time
 
 # Temperature gradient
-sql = """SELECT temp_gradient FROM summary_all where leg = '{}' and site = '{}' and hole in {} ;""".format(Leg, Site, Holes)
+sql = """SELECT temp_gradient FROM site_summary where leg = '{}' and site = '{}';""".format(Leg, Site)
 temp_gradient = pd.read_sql(sql, con)
 temp_gradient = temp_gradient.iloc[0,0]
-
 # Bottom water temp
-sql = """SELECT bottom_water_temp FROM summary_all where leg = '{}' and site = '{}' and hole in {} ;""".format(Leg, Site, Holes)
+sql = """SELECT bottom_water_temp FROM site_summary where leg = '{}' and site = '{}';""".format(Leg, Site)
 bottom_temp = pd.read_sql(sql, con)
 bottom_temp = bottom_temp.iloc[0,0]
-
 # Temperature profile (degrees C)
 def sedtemp(z, bottom_temp):
     return bottom_temp + np.multiply(z, temp_gradient)
 
 # Advection rate
-sql = """SELECT advection_rate FROM summary_all where leg = '{}' and site = '{}' and hole in {} ;""".format(Leg, Site, Holes)
+sql = """SELECT advection_rate FROM site_summary where leg = '{}' and site = '{}';""".format(Leg, Site)
 advection = pd.read_sql(sql, con)
 advection = advection.iloc[0,0]
 
@@ -142,17 +140,17 @@ def averages(names, values):
     sorted = np.column_stack((resultkeys[np.argsort(resultkeys)], resultvalues[np.argsort(resultkeys)]))
     return sorted
 
-# Concentration vector
+# Concentration vector after averaging duplicates
 concunique = averages(concdata[:, 0], concdata[:, 1])
-##### Remove for analytical tests######
+##### Remove for analytical tests ###### Adds value ct0 at seafloor
 concunique = np.concatenate((np.array(([0],ct0)).T, concunique), axis=0)
-
-concprocessed = concunique
 
 # Porosity vector
 por = averages(pordata[:, 0], pordata[:, 1])
 
-# Function for running mean for variable window size (window must be odd number)
+# Function for running mean for variable window size 
+# Window must be odd number
+# Negates furthest n points while window hangs off edge by n points
 def runningmean(arr, window):
     prepad = []
     postpad = []
@@ -162,18 +160,10 @@ def runningmean(arr, window):
         post = arr[-1] + (arr[-1] - arr[-(i+1)])
         prepad.append(pre)
         postpad.append(post)
-    prepad = np.flipud(prepad)
+    postpad = np.flipud(postpad)
     padded = np.append(np.append(prepad, arr), postpad)
     cumsum = np.cumsum(np.insert(padded, 0, 0))
     return (cumsum[window:] - cumsum[:-window])/window
-
-#Function for running mean, taking nearest of window-1 and averaging (window must be odd number)
-def nearestmean(arr, window):
-    prepad = np.ones((window-1)/2)*np.average(arr[0:window])
-    postpad = np.ones((window-1)/2)*np.average(arr[-window:])
-    cumsum = np.cumsum(np.insert(arr, 0, 0))
-    smoothed = (cumsum[window:] - cumsum[:-window])/window
-    return np.append(np.append(prepad, smoothed), postpad)
 
 ###############################################################################
 # Concentration data preparation
@@ -193,17 +183,17 @@ aftconc1 = concpad[3:conplen-1]
 aftconc2 = concpad[4:conplen]
 
 concsmooth = np.column_stack((concunique[:,0], (befconc2*0.06+befconc1*0.24+concunique[:,1]*0.4+aftconc1*0.24+aftconc2*0.06)))
-concprocessed = concsmooth
+concprocessed = concsmooth  #Seawater value added, duplicates averaged, smoothed data (Need this intermediate object?)
 
-# Make interpolation function
+# Make interpolation function for concentrations
 concinterp = interp1d(concprocessed[:, 0], concprocessed[:, 1], kind='linear')
 # concfit = np.polyfit(conc[:,0], conc[:,1], 4)
 # conclinefit = np.poly1d(concfit)
 
 
 ###############################################################################
-# Lower boundary condition (constant set at dirichlet)
-cb = concprocessed[-1, 1]
+# Lower boundary condition (constant, set at dirichlet)
+cb = concprocessed[-1, 1]  # Same as concunique[-1, 1]
 
 ###############################################################################
 # Porosity data preparation
@@ -211,7 +201,7 @@ cb = concprocessed[-1, 1]
 porvalues = por[:, 1]
 pordepth = por[:, 0]
 
-# Porosity curve fit
+# Porosity curve fit (ref?)
 def porcurve(z, a):
     portop = por[0, 1]
     porbottom = por[-1, 1]
@@ -219,7 +209,7 @@ def porcurve(z, a):
 
 porfit, porcov = optimize.curve_fit(porcurve, pordepth, porvalues)
 
-# Solids curve fit (based on porosity)
+# Solids curve fit (based on porosity curve fit function)
 def solidcurve(z, a):
     portop = por[0, 1]
     porbottom = por[-1, 1]
@@ -228,8 +218,8 @@ def solidcurve(z, a):
 ###############################################################################
 # Diffusion coefficient function
 
-# Viscosity from Mostafa H. Sharqawy 12-18-2009, MIT (mhamed@mit.edu) Sharqawy M. H., Lienhard J. H., and Zubair, S. M., Desalination and Water Treatment, 2009
-# Viscosity at diffusion coefficient reference temperature
+# Calculates viscosity from Mostafa H. Sharqawy 12-18-2009, MIT (mhamed@mit.edu) Sharqawy M. H., Lienhard J. H., and Zubair, S. M., Desalination and Water Treatment, 2009
+# Viscosity used as input into Stokes-Einstein equation
 # Td is the reference temperature (TempD), T is the in situ temperature
 def Dst(Td, T):
     # Viscosity at reference temperature 
@@ -249,33 +239,41 @@ def Dst(Td, T):
 
 ###############################################################################
 # Calculate ages at depth intervals
+### Is any of this needed for this formulation???? Need bottom age.
 
+# Get sedimentation rates from age-depth data
 sedtimes = sed[:, 1]
 seddepths = sed[:, 0]
 sedrates = np.diff(seddepths, axis=0)/np.diff(sedtimes, axis=0)  # m/y
 
-# Function for appending float to array and trimming the array to that value
+# Function for appending float to array and trimming the sorted array to have 
+# that value at end of the array
 def insertandcut(value, array):
     findindex = array.searchsorted(value)
     sortedarray = np.insert(array, findindex, value)[:findindex+1]
     return sortedarray
+
+# Make bottom depth of deepest pore water concentration measurement the end 
+# of age-depth array
 maxconcdepth = np.max(concdata[:,0])
 sedconcdepths = insertandcut(maxconcdepth, seddepths)
 
-# Split sediment column into intervals (intervals of differing mass but same thickness)
+# Split sediment column into intervals of differing mass (due to porosity 
+# change) but same thickness
 intervalthickness = maxconcdepth/intervals
-intervalradius = intervalthickness/2
-intervaldepths = (np.arange(intervals+1)*intervalthickness)
+# intervalradius = intervalthickness/2 (Is this needed?)
+intervaldepths = (np.arange(intervals+1)*intervalthickness)  # Depths at bottom of intervals
 midpoints = np.add(intervaldepths[:-1], np.diff(intervaldepths)/2)
 
-# Mass of each interval based on porosity curve
+# Mass (1-dimensional volume of solids) of each model interval based on porosity curve
 runningmass = []
 for i in intervaldepths:
     runningmass.append(integrate.quad(solidcurve, 0, i, args=(porfit))[0])
 intervalmass = np.diff(runningmass)
 columnmass = np.cumsum(intervalmass)
 
-# Sediment mass accumulation rates for each age-depth section
+# Sediment mass (1-dimensional volume of solids) accumulation rates for each age-depth section
+# Assumes constant sediment mass (really volume of solids) accumulation rates between age-depth measurements
 sectionmasses = [0]
 sedmassrates = np.zeros(len(sedrates))  # unique avg sed mass accumulation rates to bottom of conc profile
 for i in np.arange(len(sedrates)):
@@ -286,6 +284,8 @@ for i in np.arange(len(sedrates)):
 sectionmasses = np.array(sectionmasses)
 
 # Interval ages and bottom age (at bottom of concentration profile)
+# Can be slightly off where model sediment interval straddles age-depth datapoint depth, uses deeper (older) sed rate in that case
+####### Could be minimized by using midpoint as marker for sed rate call #######
 midpointages = []
 intervalages = [] 
 for i in np.arange(len(seddepths)-1):
@@ -298,6 +298,8 @@ for i in np.arange(len(seddepths)-1):
             midpointage = sedtimes[i]+(integrate.quad(solidcurve, sedconcdepths[i], midpoints[m], args=(porfit)))[0]/sedmassrates[i]
             midpointages.append(midpointage)
 
+# In case deepest pore water measurement is deeper than deepest age-depth 
+# measurement, uses deepest age-depth measurement for rest of depth
 for n in np.arange(len(intervaldepths)):
     if intervaldepths[n] >= seddepths[-1]:
         intervalage = sedtimes[-1]+(integrate.quad(solidcurve, seddepths[-1], intervaldepths[n], args=(porfit)))[0]/sedmassrates[-1]
@@ -314,8 +316,6 @@ bottomage = intervalages[-1]
 dt = bottomage/timesteps # time step for each interval
 sedconctimes = np.append(sedtimes[0:len(sedrates)], bottomage)
 
-
-# concline = conclinefit(intervaldepths)
 ###############################################################################
 # Plot data for inspection
 
@@ -344,11 +344,12 @@ ax1.invert_yaxis()
 ax2.invert_yaxis()
 ax3.invert_yaxis()
 savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output data figures\dataprofiles_{}_{}.png".format(Leg, Site))
-#plt.waitforbuttonpress()
-#plt.close()
 
 ###############################################################################
 # Sedimentation rate at each time step
+# Uses sed rate at end of timestep in cases where timestep straddles age-depth measurement
+#### Can write function to fix this
+#### Why use sedconctimes???
 iterationtimes = ((np.arange(timesteps+1)*dt)[1:]).tolist()
 sedmassratetime = []
 for i in np.arange(len(sedconctimes)-1):
@@ -360,11 +361,10 @@ for i in np.arange(len(sedconctimes)-1):
 sedmassratetime = np.array(sedmassratetime)
 
 ###############################################################################
-# # Bottom water concentration curve vs time at each timestep (upper boundary condition)
+# Bottom water concentration curve vs time at each timestep (upper boundary condition)
 ct = np.interp(iterationtimes, salinity[:,0]*10**6, salinity[:,1])/34.7*ct0
 
 ###############################################################################
-
 # Reactive transport model
 
 #Sediment properties
@@ -407,7 +407,7 @@ plt.plot(modelrate, intervaldepths[1:-1])
 plt.gca().invert_yaxis()
 plt.show()
 '''
-# Grid peclet and courant numbers
+# Grid peclet and Courant numbers
 gpeclet = np.abs((advection*porosity[0]/porosity[-1]+pwburialflux[0]/porosity[-1])*intervalthickness/np.min(Dsed))[0]
 print('Grid Peclet (less than 2):', gpeclet)
 courant = np.abs((advection*porosity[0]/porosity[-1]+pwburialflux[0]/porosity[-1])*dt/intervalthickness)[0]
@@ -415,7 +415,7 @@ print('Courant (less than 1):', courant)
 #neumann = intervalthickness**2/(3*np.max(Dsed))
 #print('Von Neumann (greater than dt):', neumann, 'dt:', dt)
 
-# Run average model rates over every time step
+# Run average model rates over every time step (Check formulation)
 concprofile = []
 for i in np.arange(timesteps):
     flux =  porosity[1:-1]*Dsed[1:-1]*(concvalues[2:] - 2*concvalues[1:-1] + concvalues[:-2])/(intervalthickness**2) - (pwburialflux[i] + porosity[0]*advection)*(concvalues[2:] - concvalues[:-2])/(2*intervalthickness)     
@@ -423,7 +423,8 @@ for i in np.arange(timesteps):
 concprofile.append(avgvalues)
 
 
-modelratesmooth = nearestmean(modelratefinal, smoothing)
+#### Why do this running mean???
+modelratesmooth = runningmean(modelratefinal, smoothing)
 integratedrate = sum(modelratesmooth*intervalvector)
 print('Integrated rate:', integratedrate)
 
