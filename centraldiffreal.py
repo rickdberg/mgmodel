@@ -183,7 +183,7 @@ aftconc1 = concpad[3:conplen-1]
 aftconc2 = concpad[4:conplen]
 
 concsmooth = np.column_stack((concunique[:,0], (befconc2*0.06+befconc1*0.24+concunique[:,1]*0.4+aftconc1*0.24+aftconc2*0.06)))
-concprocessed = concsmooth  #Seawater value added, duplicates averaged, smoothed data (Need this intermediate object?)
+concprocessed = concsmooth  #Seawater value added, duplicates averaged, smoothed data
 
 # Make interpolation function for concentrations
 concinterp = interp1d(concprocessed[:, 0], concprocessed[:, 1], kind='linear')
@@ -201,7 +201,7 @@ cb = concprocessed[-1, 1]  # Same as concunique[-1, 1]
 porvalues = por[:, 1]
 pordepth = por[:, 0]
 
-# Porosity curve fit (ref?)
+# Porosity curve fit (ref?) (Makes porosity at sed surface equal to first measurement)
 def porcurve(z, a):
     portop = por[0, 1]
     porbottom = por[-1, 1]
@@ -238,8 +238,7 @@ def Dst(Td, T):
     return T/vis*visd*Ds/Td  # Stokes-Einstein equation
 
 ###############################################################################
-# Calculate ages at depth intervals
-### Is any of this needed for this formulation???? Need bottom age.
+# Calculate ages at depth intervals and get age at lowest pore water measurement
 
 # Get sedimentation rates from age-depth data
 sedtimes = sed[:, 1]
@@ -261,7 +260,6 @@ sedconcdepths = insertandcut(maxconcdepth, seddepths)
 # Split sediment column into intervals of differing mass (due to porosity 
 # change) but same thickness
 intervalthickness = maxconcdepth/intervals
-# intervalradius = intervalthickness/2 (Is this needed?)
 intervaldepths = (np.arange(intervals+1)*intervalthickness)  # Depths at bottom of intervals
 midpoints = np.add(intervaldepths[:-1], np.diff(intervaldepths)/2)
 
@@ -349,7 +347,6 @@ savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output 
 # Sedimentation rate at each time step
 # Uses sed rate at end of timestep in cases where timestep straddles age-depth measurement
 #### Can write function to fix this
-#### Why use sedconctimes???
 iterationtimes = ((np.arange(timesteps+1)*dt)[1:]).tolist()
 sedmassratetime = []
 for i in np.arange(len(sedconctimes)-1):
@@ -361,8 +358,10 @@ for i in np.arange(len(sedconctimes)-1):
 sedmassratetime = np.array(sedmassratetime)
 
 ###############################################################################
-# Bottom water concentration curve vs time at each timestep (upper boundary condition)
+# Bottom water concentration curve vs time at each timestep 
+# (upper boundary condition)
 ct = np.interp(iterationtimes, salinity[:,0]*10**6, salinity[:,1])/34.7*ct0
+ct = np.flipud(ct)
 
 ###############################################################################
 # Reactive transport model
@@ -380,25 +379,27 @@ for i in np.arange(len(sedmassratetime)):
     pwburial = deeppor*sedmassratetime[i]/deepsolid
     pwburialflux[i] = np.flipud(pwburial)
 
-# Reactive-transport engine
-concvalues = concinterp(intervaldepths) # initial conditions (this is where to put approximate profile also)
+# Reactive-transport engine (central difference formula)
+concvalues = concinterp(intervaldepths) # initial conditions
 edgedepths = intervaldepths[1:-1]
 edgevalues = concinterp(intervaldepths)
 concprofile = []
 modelrates = []
-intervalvector = np.append(np.append([1.5*intervalthickness], np.ones(intervals-3)*intervalthickness), [1.5*intervalthickness])
+intervalvector = np.append(np.append([1.5*intervalthickness], np.ones(intervals-3) * intervalthickness), [1.5*intervalthickness])
 for i in np.arange(timesteps):
-    flux = porosity[1:-1]*Dsed[1:-1]*(edgevalues[2:] - 2*edgevalues[1:-1] + edgevalues[:-2])/(intervalthickness**2) - (pwburialflux[i] + porosity[0]*advection)*(edgevalues[2:] - edgevalues[:-2])/(2*intervalthickness)      
-    edgevalues = edgevalues[1:-1] + flux*dt
-    concdiff = concvalues[1:-1] - edgevalues
+    flux = porosity[1:-1] * Dsed[1:-1] * (edgevalues[2:] 
+    - 2*edgevalues[1:-1] + edgevalues[:-2]) / (intervalthickness**2) 
+    - (pwburialflux[i] + porosity[0] * advection) * (edgevalues[2:] 
+    - edgevalues[:-2]) / (2*intervalthickness)      
+    next_edgevalues = edgevalues[1:-1] + flux*dt
+    concdiff = concvalues[1:-1] - next_edgevalues
     modelrate = concdiff/dt
-    edgevalues = np.append(np.append([ct[i]], edgevalues + modelrate*dt), [cb])
+    edgevalues = np.append(np.append([ct[i]], next_edgevalues + modelrate*dt), [cb])
     modelrates.append(modelrate)
     concprofile.append(edgevalues[1:-1])
 
-modelrate = np.mean(modelrates, axis=0)
-modelratefinal = np.mean(modelrates, axis=0)
-
+modelrate_avg = np.mean(modelrates, axis=0)
+modelrate_modern = modelrates[-1]
 
 '''
 # Plot to show progression of model run
@@ -415,16 +416,21 @@ print('Courant (less than 1):', courant)
 #neumann = intervalthickness**2/(3*np.max(Dsed))
 #print('Von Neumann (greater than dt):', neumann, 'dt:', dt)
 
-# Run average model rates over every time step (Check formulation)
+'''# Run average model rates forward over every time step
 concprofile = []
+avgvalues = concvalues
 for i in np.arange(timesteps):
-    flux =  porosity[1:-1]*Dsed[1:-1]*(concvalues[2:] - 2*concvalues[1:-1] + concvalues[:-2])/(intervalthickness**2) - (pwburialflux[i] + porosity[0]*advection)*(concvalues[2:] - concvalues[:-2])/(2*intervalthickness)     
-    avgvalues = concvalues[1:-1] + flux*dt + modelratefinal*dt
-concprofile.append(avgvalues)
+    flux =  porosity[1:-1]*Dsed[1:-1]*(avgvalues[2:] - 2*avgvalues[1:-1] 
+    + avgvalues[:-2])/(intervalthickness**2) - (pwburialflux[i] + porosity[0]
+    *advection)*(avgvalues[2:] - avgvalues[:-2])/(2*intervalthickness)     
+    
+    next_avgvalues = avgvalues[1:-1] + flux*dt + modelrate_avg*dt
+    avgvalues = np.append(np.append([ct[i]], next_avgvalues), [cb])
+    concprofile.append(avgvalues)
+'''
 
-
-#### Why do this running mean???
-modelratesmooth = runningmean(modelratefinal, smoothing)
+#### Smoothing set to one right now, not used, available if needed
+modelratesmooth = runningmean(modelrate_avg, smoothing)
 integratedrate = sum(modelratesmooth*intervalvector)
 print('Integrated rate:', integratedrate)
 
@@ -432,11 +438,11 @@ print('Integrated rate:', integratedrate)
 def rsq(modeled, measured):
     yresid = measured - modeled
     sse = sum(yresid**2)
-    sstotal = (len(measured)-1)*np.var(measured)
+    sstotal = (len(measured)-1) * np.var(measured)
     return 1-sse/sstotal
 
-# Calculate r-squared
-rsquared = rsq(concprofile[-1], concvalues[1:-1])
+# Calculate r-squared between original data and modeled data
+rsquared = rsq(concprocessed[:,1], concunique[:,1])
 print('r-squared:', rsquared)
 
 ###############################################################################
@@ -450,12 +456,11 @@ ax4 = plt.subplot(gs2[0, :2])
 ax5 = plt.subplot(gs2[0, 2:4], sharey=ax4)
 ax5.grid()
 
-# ax4.plot(noreaction, midpoints)
-ax4.plot(concprofile[-1], intervaldepths[1:-1], 'r+', label='Model')
+ax4.plot(concprofile[-1], intervaldepths[1:-1], '-', label='Model fit')
 ax4.plot(concdata[:,1], concdata[:,0], 'go', label='Measured', mfc='None')
-ax4.plot(concvalues, intervaldepths, '-', label='Line fit', mfc='None')
-ax5.plot(modelratefinal*1000000, intervaldepths[1:-1])
-ax5.plot(modelratesmooth*1000000, intervaldepths[1:-1])
+ax5.plot(modelrate_avg*1000000, intervaldepths[1:-1], 'k-', label='Average', mfc='None')
+# ax5.plot(modelratesmooth*1000000, intervaldepths[1:-1])
+ax5.plot(modelrate_modern*1000000, intervaldepths[1:-1], 'b-', label='Modern', mfc='None')
 ax4.legend(loc='lower right', fontsize='small')
 ax4.set_ylabel('Depth (mbsf)')
 ax4.set_xlabel('Concentration (mM)')
@@ -467,9 +472,11 @@ savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output 
 
 
 # Save reaction rate and porosity data in csv files
-modelrxnrates = np.column_stack((modelratesmooth, intervaldepths[1:-1]))
+avg_modelrates = np.column_stack((intervaldepths[1:-1], modelratesmooth))
+full_modelrates = modelrates
 modelporosity = np.column_stack((intervaldepths, porosity))
 np.savetxt(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output porosity data\modelporosity_{}_{}.csv".format(Leg, Site), modelporosity, delimiter="\t")
-np.savetxt(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output rate data\modelrates_{}_{}.csv".format(Leg, Site), modelrxnrates, delimiter="\t")
+np.savetxt(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output rate data\avg_modelrates_{}_{}.csv".format(Leg, Site), avg_modelrates, delimiter="\t")
+np.savetxt(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output rate data\full_modelrates_{}_{}.csv".format(Leg, Site), full_modelrates, delimiter="\t")
 
 # eof

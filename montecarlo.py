@@ -40,9 +40,10 @@ while i < cycles:
 
 # Calculate integrated rates for random profiles after smoothing randomized 
 # errored data
-integratedrates = []
+integratedrates_avg = []
+integratedrates_modern = []
 for n in range(cycles):
-    conc = concunique[:,1] + concunique[:,1]*offsets[n]
+    conc = concunique[:,1] + concunique[:,1] * offsets[n]
     
     # Concentration smoothing 5-pt gaussian (approximate) (Does this handle edges correctly??)
     prepad = [(conc[0]+(conc[0]-conc[2])), (conc[0]+(conc[0]-conc[1]))]
@@ -65,30 +66,38 @@ for n in range(cycles):
     concprofile = []
     modelrates = []
     for i in np.arange(timesteps):
-        flux = porosity[1:-1]*Dsed[1:-1]*(edgevalues[2:] - 2*edgevalues[1:-1] + edgevalues[:-2])/(intervalthickness**2) - (pwburialflux[i] + porosity[0]*advection)*(edgevalues[2:] - edgevalues[:-2])/(2*intervalthickness)      
-        edgevalues = edgevalues[1:-1] + flux*dt
-        concdiff = concvalues[1:-1] - edgevalues
+        flux = porosity[1:-1]*Dsed[1:-1]*(edgevalues[2:] - 2*edgevalues[1:-1]
+        + edgevalues[:-2])/(intervalthickness**2) - (pwburialflux[i] 
+        + porosity[0]*advection)*(edgevalues[2:] - edgevalues[:-2]) / (2*intervalthickness)
+        next_edgevalues = edgevalues[1:-1] + flux*dt
+        concdiff = concvalues[1:-1] - next_edgevalues
         modelrate = concdiff/dt
-        edgevalues = np.append(np.append([ct[i]], edgevalues + modelrate*dt), [cb])
+        edgevalues = np.append(np.append([ct[i]], next_edgevalues + modelrate*dt), [cb])
         modelrates.append(modelrate)
 
-    modelratefinal = np.mean(modelrates, axis=0)
-    integratedrate = sum(modelratefinal*intervalvector) # Should I use intervalvector??
-    integratedrates.append(integratedrate)
-
+    modelratefinal_avg = np.mean(modelrates, axis=0)
+    integratedrate_avg = sum(modelratefinal_avg * intervalvector)
+    integratedrates_avg.append(integratedrate_avg)
+    
+    modelratefinal_modern = modelrates[:,-1]
+    integatedrate_modern = sum(modelratefinal_modern * intervalvector)
+    integratedrates_modern.append(integratedrate_modern)
 
 # Distribution statistics
-modelmean = np.mean(integratedrates)
-print('Mean:', modelmean)
+modelmean_avg = np.mean(integratedrates_avg)
+modelmean_modern = np.mean(integratedrates_modern)
+print('Modern Mean:', modelmean_modern)
 
-modelmedian = np.median(integratedrates)
-print('Median:', modelmedian)
+modelmedian_avg = np.median(integratedrates_avg)
+modelmedian_modern = np.median(integratedrates_modern)
+print('Modern Median:', modelmedian_modern)
 
-stdev = np.std(integratedrates)
-print('Std Dev:', stdev)
+stdev_avg = np.std(integratedrates_avg)
+stdev_modern = np.std(integratedrates_modern)
+print('Modern Std Dev:', stdev_modern)
 
 
-pl.hist(integratedrates, bins=50)
+pl.hist(integratedrates_modern, bins=50)
 pl.xlabel("Integrated Rate")
 pl.ylabel("N")
 pl.savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output monte carlo distributions\montecarlo_{}_{}.png".format(Leg, Site))
@@ -105,18 +114,18 @@ cur = con.cursor()
 cur.execute("""select site_key from site_list where leg = '{}' and site = '{}' ;""".format(Leg, Site))
 site_key = cur.fetchone()[0]
 cur.execute("""insert into model_metadata (site_key, leg, site, hole, solute, 
-mean_integrated_rate, median_integrated_rate, model_std_deviation, r_squared, 
-timesteps, number_of_intervals, datapoints, smoothing_window, measurement_precision, 
+mean_integrated_rate_avg, median_integrated_rate_avg, model_std_deviation_avg, mean_integrated_rate_modern, median_integrated_rate_modern, model_std_deviation_modern, r_squared, 
+timesteps, bottom_age, number_of_intervals, datapoints, smoothing_window, measurement_precision, 
 monte_carlo_cycles, grid_peclet, courant, ds, ds_reference_temp, script, run_date) 
-VALUES ({}, {}, {}, '{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, 
-{}, '{}', '{}')  ON DUPLICATE KEY UPDATE hole='{}', solute='{}', mean_integrated_rate={}, 
-median_integrated_rate={}, model_std_deviation={}, r_squared={}, timesteps={}, 
+VALUES ({}, {}, {}, '{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, 
+{}, '{}', '{}')  ON DUPLICATE KEY UPDATE hole='{}', solute='{}', mean_integrated_rate_avg={}, 
+median_integrated_rate_avg={}, model_std_deviation_avg={}, mean_integrated_rate_modern={}, median_integrated_rate_modern={},model_std_deviation_modern={}, r_squared={}, timesteps={}, bottom_age={}, 
 number_of_intervals={}, datapoints={}, smoothing_window={}, measurement_precision={}, 
 monte_carlo_cycles={}, grid_peclet={}, courant={}, ds={}, ds_reference_temp={}, 
-script='{}', run_date='{}' ;""".format(site_key, Leg, Site, Hole, Solute, modelmean, 
-modelmedian, stdev, rsquared, timesteps, intervals, datapoints, smoothing, precision, 
-cycles, gpeclet, courant, Ds, TempD, Script, Date, Hole, Solute, modelmean, modelmedian, 
-stdev, rsquared, timesteps, intervals, datapoints, smoothing, precision, cycles, gpeclet, 
+script='{}', run_date='{}' ;""".format(site_key, Leg, Site, Hole, Solute, modelmean_avg, 
+modelmedian_avg, stdev_avg, modelmean_modern, modelmedian_modern, stdev_modern, rsquared, timesteps, bottomage, intervals, datapoints, smoothing, precision, 
+cycles, gpeclet, courant, Ds, TempD, Script, Date, Hole, Solute, modelmean_avg, modelmedian_avg, 
+stdev_avg, modelmean_modern, modelmedian_modern, stdev_modern, rsquared, timesteps, bottomage, intervals, datapoints, smoothing, precision, cycles, gpeclet, 
 courant, Ds, TempD, Script, Date))
 con.commit()
 
