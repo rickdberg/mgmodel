@@ -27,16 +27,19 @@ the model forward to get the fit.
 Final rate output is in mol m-3 (bulk sediment) y-1
 (Same as Wang model)
 
-Units: meters, years, mol m**-3 (aka mM), Celsius. 
+Units: meters, years, mol m**-3 (aka mM), Celsius.
+Positive values of reaction rate indicate uptake into sediment.
 
 [Column, Row]
 """
 import numpy as np
 import pandas as pd
+import scipy as sp
 import MySQLdb
 import datetime
 import os
 import matplotlib.pyplot as plt
+import scipy.ndimage as ndimage
 from scipy.interpolate import interp1d
 from scipy import optimize, integrate
 from collections import defaultdict
@@ -167,10 +170,10 @@ def runningmean(arr, window):
 
 ###############################################################################
 # Concentration data preparation
-
+'''
 # Smooth and interpolate the concentration data using 5 point gaussian
 
-# Concentration smoothing 5-pt gaussian (approximate)
+# Concentration smoothing 5-pt gaussian (approximate), reflected at edges
 
 prepad = [(concunique[0, 1]+(concunique[0, 1]-concunique[2, 1])), (concunique[0, 1]+(concunique[0, 1]-concunique[1, 1]))]
 postpad = [(concunique[-1, 1]+(concunique[-1, 1]-concunique[-2, 1])), (concunique[-1, 1]+(concunique[-1, 1]-concunique[-3, 1]))]
@@ -183,6 +186,10 @@ aftconc1 = concpad[3:conplen-1]
 aftconc2 = concpad[4:conplen]
 
 concsmooth = np.column_stack((concunique[:,0], (befconc2*0.06+befconc1*0.24+concunique[:,1]*0.4+aftconc1*0.24+aftconc2*0.06)))
+'''
+# Smooth concentrations using 5-point gaussian using reflect at edges
+concsmooth = np.column_stack((concunique[:,0], (ndimage.filters.gaussian_filter1d(concunique[:,1], 1, axis=0, mode='reflect'))))
+
 concprocessed = concsmooth  #Seawater value added, duplicates averaged, smoothed data
 
 # Make interpolation function for concentrations
@@ -274,7 +281,7 @@ columnmass = np.cumsum(intervalmass)
 # Assumes constant sediment mass (really volume of solids) accumulation rates between age-depth measurements
 sectionmasses = [0]
 sedmassrates = np.zeros(len(sedrates))  # unique avg sed mass accumulation rates to bottom of conc profile
-for i in np.arange(len(sedrates)):
+for i in range(len(sedrates)):
     sectionmass = (integrate.quad(solidcurve, seddepths[i], seddepths[i+1], args=(porfit)))[0]
     sedmassrate = (sectionmass/np.diff(sedtimes)[i])
     sedmassrates[i] = sedmassrate
@@ -286,23 +293,23 @@ sectionmasses = np.array(sectionmasses)
 ####### Could be minimized by using midpoint as marker for sed rate call #######
 midpointages = []
 intervalages = [] 
-for i in np.arange(len(seddepths)-1):
+for i in range(len(seddepths)-1):
     for n in np.arange(len(intervaldepths)):
         if intervaldepths[n] >= seddepths[i] and intervaldepths[n] < seddepths[i+1]:
             intervalage = sedtimes[i]+(integrate.quad(solidcurve, sedconcdepths[i], intervaldepths[n], args=(porfit)))[0]/sedmassrates[i]
             intervalages.append(intervalage)
-    for m in np.arange(len(midpoints)):
+    for m in range(len(midpoints)):
         if midpoints[m] >= seddepths[i] and midpoints[m] < seddepths[i+1]:
             midpointage = sedtimes[i]+(integrate.quad(solidcurve, sedconcdepths[i], midpoints[m], args=(porfit)))[0]/sedmassrates[i]
             midpointages.append(midpointage)
 
 # In case deepest pore water measurement is deeper than deepest age-depth 
 # measurement, uses deepest age-depth measurement for rest of depth
-for n in np.arange(len(intervaldepths)):
+for n in range(len(intervaldepths)):
     if intervaldepths[n] >= seddepths[-1]:
         intervalage = sedtimes[-1]+(integrate.quad(solidcurve, seddepths[-1], intervaldepths[n], args=(porfit)))[0]/sedmassrates[-1]
         intervalages.append(intervalage)
-for m in np.arange(len(midpoints)):    
+for m in range(len(midpoints)):    
     if midpoints[m] >= seddepths[-1]:
         midpointage = sedtimes[-1]+(integrate.quad(solidcurve, seddepths[-1], midpoints[m], args=(porfit)))[0]/sedmassrates[-1]
         midpointages.append(midpointage)
@@ -349,7 +356,7 @@ savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output 
 #### Can write function to fix this
 iterationtimes = ((np.arange(timesteps+1)*dt)[1:]).tolist()
 sedmassratetime = []
-for i in np.arange(len(sedconctimes)-1):
+for i in range(len(sedconctimes)-1):
     if i == 0:
         sedmassratet = np.ones(iterationtimes.index(min(iterationtimes, key=lambda x:abs(x-sedconctimes[i+1]))) + 1 - iterationtimes.index(min(iterationtimes, key=lambda x:abs(x-sedconctimes[i])))) * sedmassrates[i]
     else:
@@ -381,16 +388,14 @@ for i in np.arange(len(sedmassratetime)):
 
 # Reactive-transport engine (central difference formula)
 concvalues = concinterp(intervaldepths) # initial conditions
-edgedepths = intervaldepths[1:-1]
-edgevalues = concinterp(intervaldepths)
+edgevalues = concvalues
 concprofile = []
 modelrates = []
 intervalvector = np.append(np.append([1.5*intervalthickness], np.ones(intervals-3) * intervalthickness), [1.5*intervalthickness])
-for i in np.arange(timesteps):
-    flux = porosity[1:-1] * Dsed[1:-1] * (edgevalues[2:] 
-    - 2*edgevalues[1:-1] + edgevalues[:-2]) / (intervalthickness**2) 
-    - (pwburialflux[i] + porosity[0] * advection) * (edgevalues[2:] 
-    - edgevalues[:-2]) / (2*intervalthickness)      
+for i in range(timesteps):
+    flux = porosity[1:-1] * Dsed[1:-1] * (edgevalues[2:] - 2*edgevalues[1:-1] 
+    + edgevalues[:-2]) / (intervalthickness**2) - (pwburialflux[i] 
+    + porosity[0] * advection) * (edgevalues[2:] - edgevalues[:-2]) / (2*intervalthickness)      
     next_edgevalues = edgevalues[1:-1] + flux*dt
     concdiff = concvalues[1:-1] - next_edgevalues
     modelrate = concdiff/dt
@@ -430,7 +435,7 @@ for i in np.arange(timesteps):
 '''
 
 #### Smoothing set to one right now, not used, available if needed
-modelratesmooth = runningmean(modelrate_avg, smoothing)
+modelratesmooth = runningmean(modelrate_modern, smoothing)
 integratedrate = sum(modelratesmooth*intervalvector)
 print('Integrated rate:', integratedrate)
 
@@ -453,6 +458,7 @@ previewfigs2, (ax4, ax5) = plt.subplots(1, 2, sharey=True, figsize=(8, 6))
 gs2 = gridspec.GridSpec(1, 4)
 gs2.update(wspace=0.3)
 ax4 = plt.subplot(gs2[0, :2])
+ax4.grid()
 ax5 = plt.subplot(gs2[0, 2:4], sharey=ax4)
 ax5.grid()
 
@@ -462,6 +468,7 @@ ax5.plot(modelrate_avg*1000000, intervaldepths[1:-1], 'k-', label='Average', mfc
 # ax5.plot(modelratesmooth*1000000, intervaldepths[1:-1])
 ax5.plot(modelrate_modern*1000000, intervaldepths[1:-1], 'b-', label='Modern', mfc='None')
 ax4.legend(loc='lower right', fontsize='small')
+ax5.legend(loc='lower right', fontsize='small')
 ax4.set_ylabel('Depth (mbsf)')
 ax4.set_xlabel('Concentration (mM)')
 ax5.set_xlabel('Reaction Rate x 10^-6')
