@@ -12,7 +12,7 @@ import scipy.ndimage as ndimage
 
 
 # Simulation parameters
-cycles = 50
+cycles = 100
 relativeerror = precision
 
 '''
@@ -118,7 +118,7 @@ cur = con.cursor()
 # Save metadata in database
 cur.execute("""select site_key from site_summary where leg = '{}' and site = '{}' ;""".format(Leg, Site))
 site_key = cur.fetchone()[0]
-cur.execute("""insert into model_metadata (site_key, leg, site, hole, solute, 
+cur.execute("""insert into model_metadata_{} (site_key, leg, site, hole, solute, 
 mean_integrated_rate_avg, median_integrated_rate_avg, model_std_deviation_avg, mean_integrated_rate_modern, median_integrated_rate_modern, model_std_deviation_modern, r_squared, 
 timesteps, bottom_age, number_of_intervals, datapoints, smoothing_window, measurement_precision, 
 monte_carlo_cycles, grid_peclet, courant, ds, ds_reference_temp, script, run_date) 
@@ -127,7 +127,7 @@ VALUES ({}, {}, {}, '{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, 
 median_integrated_rate_avg={}, model_std_deviation_avg={}, mean_integrated_rate_modern={}, median_integrated_rate_modern={},model_std_deviation_modern={}, r_squared={}, timesteps={}, bottom_age={}, 
 number_of_intervals={}, datapoints={}, smoothing_window={}, measurement_precision={}, 
 monte_carlo_cycles={}, grid_peclet={}, courant={}, ds={}, ds_reference_temp={}, 
-script='{}', run_date='{}' ;""".format(site_key, Leg, Site, Hole, Solute, modelmean_avg, 
+script='{}', run_date='{}' ;""".format(Solute, site_key, Leg, Site, Hole, Solute, modelmean_avg, 
 modelmedian_avg, stdev_avg, modelmean_modern, modelmedian_modern, stdev_modern, rsquared, timesteps, bottomage, intervals, datapoints, smoothing, precision, 
 cycles, gpeclet, courant, Ds, TempD, Script, Date, Hole, Solute, modelmean_avg, modelmedian_avg, 
 stdev_avg, modelmean_modern, modelmedian_modern, stdev_modern, rsquared, timesteps, bottomage, intervals, datapoints, smoothing, precision, cycles, gpeclet, 

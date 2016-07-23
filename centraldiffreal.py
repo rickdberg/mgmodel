@@ -38,6 +38,7 @@ import scipy as sp
 import MySQLdb
 import datetime
 import os
+import math
 import matplotlib.pyplot as plt
 import scipy.ndimage as ndimage
 from scipy.interpolate import interp1d
@@ -57,8 +58,7 @@ Hole = ''.join(filter(str.isalpha, Holes))
 
 # Model parameters
 timesteps = 1000  # Number of timesteps
-intervals = 55  # Number of intervals (Make automated)
-smoothing = 1  # Data points to use for smoothing modelrate profile
+smoothing = 1  # Window to use for smoothing modelrate profile (Running mean - must be odd number)
 
 # Species parameters
 Solute = 'Mg'
@@ -86,6 +86,9 @@ concdata = pd.read_sql(sql, con)
 concdata = concdata.as_matrix()
 ct0 = [concdata[0, 1]]  # mol per m^3 in modern average seawater at specific site
 datapoints = len(concdata) # Used to insert into metadata and set number of intervals
+def round_down_to_even(f):
+     return math.floor(f / 2.) * 2
+intervals = round_down_to_even(datapoints)  # Number of intervals
 
 # Porosity data
 sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and method like('%C') and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
