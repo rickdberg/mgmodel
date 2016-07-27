@@ -154,6 +154,9 @@ def averages(names, values):
     sorted = np.column_stack((resultkeys[np.argsort(resultkeys)], resultvalues[np.argsort(resultkeys)]))
     return sorted
 
+# Age-depth data after averaging
+sed = averages(sed[:,0], sed[:,1])
+
 # Concentration vector after averaging duplicates
 concunique = averages(concdata[:, 0], concdata[:, 1])
 ##### Remove for analytical tests ###### Adds value ct0 at seafloor
