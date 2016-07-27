@@ -52,9 +52,10 @@ Date = datetime.date.today()
 
 # Site ID
 Leg = '311'
-Site = '1325'
-Holes = "('B','C')"
+Site = '1329'
+Holes = "('C','E')"
 Hole = ''.join(filter(str.isalpha, Holes))
+Bottom_boundary = 'none' # 'none', or a depth
 
 # Model parameters
 timesteps = 1000  # Number of timesteps
@@ -77,13 +78,20 @@ passwd = 'neogene227'
 host = '127.0.0.1'
 db = 'iodp'
 conctable = 'iw_100_312'
-portable = 'mad_100_312'
+portable = 'mad_all'
 con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
 
 # Pore water chemistry data
-sql = """SELECT sample_depth, {} FROM {} where leg = '{}' and site = '{}' and hole in {} and {} is not null; """.format(Solute, conctable, Leg, Site, Holes, Solute)
+sql = """SELECT sample_depth, {} FROM {} where leg = '{}' and site = '{}' and hole in {} and {} is not null and hydrate_affected is null; """.format(Solute, conctable, Leg, Site, Holes, Solute)
 concdata = pd.read_sql(sql, con)
+concdata = concdata.sort_values(by='sample_depth')
 concdata = concdata.as_matrix()
+if Bottom_boundary == 'none':
+    concdata = concdata
+else:
+    deepest_iw_idx = np.searchsorted(concdata[:,0], Bottom_boundary)
+    concdata = concdata[:deepest_iw_idx, :]
+
 ct0 = [concdata[0, 1]]  # mol per m^3 in modern average seawater at specific site
 datapoints = len(concdata) # Used to insert into metadata and set number of intervals
 def round_down_to_even(f):
@@ -91,7 +99,7 @@ def round_down_to_even(f):
 intervals = round_down_to_even(datapoints)  # Number of intervals
 
 # Porosity data
-sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and method like('%C') and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
+sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and method like('%C%') and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
 pordata = pd.read_sql(sql, con)
 pordata = pordata.as_matrix()
 
@@ -213,7 +221,7 @@ pordepth = por[:, 0]
 
 # Porosity curve fit (ref?) (Makes porosity at sed surface equal to first measurement)
 def porcurve(z, a):
-    portop = por[0, 1]
+    portop = np.max(por[:3, 1])
     porbottom = por[-1, 1]
     return (portop-porbottom) * np.exp(-a*z) + porbottom
 

@@ -12,7 +12,7 @@ import scipy.ndimage as ndimage
 
 
 # Simulation parameters
-cycles = 100
+cycles = 2000
 relativeerror = precision
 
 '''
@@ -102,7 +102,7 @@ stdev_modern = np.std(integratedrates_modern)
 print('Modern Std Dev:', stdev_modern)
 
 
-pl.hist(integratedrates_modern, bins=50)
+pl.hist(integratedrates_modern, bins=30)
 pl.xlabel("Integrated Rate")
 pl.ylabel("N")
 pl.savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output monte carlo distributions\montecarlo_{}_{}.png".format(Leg, Site))
