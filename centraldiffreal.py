@@ -51,11 +51,11 @@ Script = os.path.basename(__file__)
 Date = datetime.date.today()
 
 # Site ID
-Leg = '311'
-Site = '1329'
-Holes = "('C','E')"
-Hole = ''.join(filter(str.isalpha, Holes))
+Leg = '316'
+Site = 'C0008'
+Holes = "('A')"
 Bottom_boundary = 'none' # 'none', or a depth
+Hole = ''.join(filter(str.isalpha, Holes))
 
 # Model parameters
 timesteps = 1000  # Number of timesteps
@@ -77,7 +77,7 @@ user = 'root'
 passwd = 'neogene227'
 host = '127.0.0.1'
 db = 'iodp'
-conctable = 'iw_100_312'
+conctable = 'iw_chikyu'
 portable = 'mad_all'
 con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
 
@@ -92,14 +92,14 @@ else:
     deepest_iw_idx = np.searchsorted(concdata[:,0], Bottom_boundary)
     concdata = concdata[:deepest_iw_idx, :]
 
-ct0 = [concdata[0, 1]]  # mol per m^3 in modern average seawater at specific site
+ct0 = [54.0]  # [concdata[0, 1]]  # mol per m^3 in modern average seawater at specific site
 datapoints = len(concdata) # Used to insert into metadata and set number of intervals
 def round_down_to_even(f):
      return math.floor(f / 2.) * 2
 intervals = round_down_to_even(datapoints)  # Number of intervals
 
 # Porosity data
-sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and method like('%C%') and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
+sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and coalesce(method,'C') like '%C%'  and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
 pordata = pd.read_sql(sql, con)
 pordata = pordata.as_matrix()
 
@@ -132,6 +132,11 @@ advection = advection.iloc[0,0]
 sql = """SELECT depth, age FROM age_depth where leg = '{}' and site = '{}' order by 1 ;""".format(Leg, Site)
 sed = pd.read_sql(sql, con)
 sed = sed.as_matrix()
+if Bottom_boundary == 'none':
+    sed = sed
+else:
+    deepest_sed_idx = np.searchsorted(sed[:,0], Bottom_boundary)
+    sed = sed[:deepest_sed_idx, :]
 
 ###############################################################################
 # Average duplicates in concentration and porosity datasets
