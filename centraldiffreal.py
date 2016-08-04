@@ -11,8 +11,8 @@ modeled as a downward flow of porewater.
 
 Bottom boundary condition set as constant concentration of lowest measured 
 value.
-Upper boundary condition set as seawater value adjusted for changing salinity
-based on sealevel records.
+Upper boundary condition set as average seawater value adjusted for 
+changing salinity based on sealevel records.
 
 Accounts for external flow and sediment/porewater burial and compaction.
 
@@ -51,10 +51,11 @@ Script = os.path.basename(__file__)
 Date = datetime.date.today()
 
 # Site ID
-Leg = '316'
-Site = 'C0008'
-Holes = "('A')"
+Leg = '315'
+Site = 'C0001'
+Holes = "('E','F','H','B')"
 Bottom_boundary = 'none' # 'none', or a depth
+age_depth_boundaries = [0, 7, 15, 23, 29] # Index when sorted by age
 Hole = ''.join(filter(str.isalpha, Holes))
 
 # Model parameters
@@ -132,11 +133,13 @@ advection = advection.iloc[0,0]
 sql = """SELECT depth, age FROM age_depth where leg = '{}' and site = '{}' order by 1 ;""".format(Leg, Site)
 sed = pd.read_sql(sql, con)
 sed = sed.as_matrix()
+sed = sed[np.argsort(sed[:,0])]
 if Bottom_boundary == 'none':
     sed = sed
 else:
     deepest_sed_idx = np.searchsorted(sed[:,0], Bottom_boundary)
     sed = sed[:deepest_sed_idx, :]
+# sedfit = np.polyfit(sed[:,0], sed[:,1], 4)
 
 ###############################################################################
 # Average duplicates in concentration and porosity datasets
@@ -159,8 +162,26 @@ def averages(names, values):
     sorted = np.column_stack((resultkeys[np.argsort(resultkeys)], resultvalues[np.argsort(resultkeys)]))
     return sorted
 
-# Age-depth data after averaging
+# Age-depth data after averaging and do piece-wise linear regression on age-depth data
 sed = averages(sed[:,0], sed[:,1])
+sed = np.column_stack((sed[:,0][np.argsort(sed[:,1])], sed[:,1][np.argsort(sed[:,1])]))
+
+def age_curve(z, p):
+    return p*z
+
+cut_depths = sed[age_depth_boundaries, 0]
+last_depth = 0
+last_age = 0
+sedrate_ages = [0]
+sedrate_depths = [0]
+for n in np.arange(len(cut_depths)-1):
+    next_depth = cut_depths[n+1]
+    sed_alt = np.stack((sed[:,0]-last_depth, sed[:,1]-last_age), axis=1)
+    p , e = optimize.curve_fit(age_curve, sed_alt[age_depth_boundaries[n]:age_depth_boundaries[n+1],0], sed_alt[age_depth_boundaries[n]:age_depth_boundaries[n+1],1])
+    last_age = age_curve(next_depth-last_depth, *p)+last_age
+    last_depth = cut_depths[n+1]
+    sedrate_ages.append(last_age)
+    sedrate_depths.append(last_depth)
 
 # Concentration vector after averaging duplicates
 concunique = averages(concdata[:, 0], concdata[:, 1])
@@ -267,8 +288,8 @@ def Dst(Td, T):
 # Calculate ages at depth intervals and get age at lowest pore water measurement
 
 # Get sedimentation rates from age-depth data
-sedtimes = sed[:, 1]
-seddepths = sed[:, 0]
+sedtimes = np.asarray(sedrate_ages)
+seddepths = np.asarray(sedrate_depths)
 sedrates = np.diff(seddepths, axis=0)/np.diff(sedtimes, axis=0)  # m/y
 
 # Function for appending float to array and trimming the sorted array to have 
@@ -343,30 +364,37 @@ sedconctimes = np.append(sedtimes[0:len(sedrates)], bottomage)
 ###############################################################################
 # Plot data for inspection
 
-previewfigs, (ax1, ax2, ax3) = plt.subplots(1, 3, sharey=True, figsize=(12, 6))
+previewfigs, (ax1, ax2, ax3) = plt.subplots(1, 3, sharey=True, figsize=(15, 6))
 
-gs = gridspec.GridSpec(1, 5)
-gs.update(wspace=0.3)
+gs = gridspec.GridSpec(1, 7)
+gs.update(wspace=0.5)
 ax1 = plt.subplot(gs[0, :2])
 ax2 = plt.subplot(gs[0, 2:4])
 ax3 = plt.subplot(gs[0, 4])
+ax4 = plt.subplot(gs[0, 5:7])
 
 ax1.plot(concdata[:, 1], concdata[:, 0], '--go', label='Measured')
 ax2.plot(por[:, 1], por[:, 0], 'mo', label='Measured')
 ax2.plot(porcurve(pordepth, porfit), pordepth, 'k-', label='Curve fit', linewidth=3)
-ax2.legend(loc='lower right', fontsize='small')
-ax1.legend(loc='lower right', fontsize='small')
+ax2.legend(loc='best', fontsize='small')
+ax1.legend(loc='best', fontsize='small')
 ax3.plot(sedtemp(np.arange(maxconcdepth), bottom_temp), np.arange(maxconcdepth), 'k-', linewidth=3)
+ax4.plot(sed[:,1]/1000000, sed[:,0], 'ko', label='Picks')
+ax4.plot(sedtimes/1000000, seddepths, 'b-', label='Curve fit', linewidth=2)
+ax4.legend(loc='best', fontsize='small')
 ax1.set_ylabel('Depth (mbsf)')
 ax1.set_xlabel('Concentration (mM)')
 ax2.set_xlabel('Porosity')
 ax3.set_xlabel('Temperature (\u00b0C)')
+ax4.set_xlabel('Age (Ma)')
 ax1.locator_params(axis='x', nbins=4)
 ax2.locator_params(axis='x', nbins=4)
 ax3.locator_params(axis='x', nbins=4)
+ax4.locator_params(axis='x', nbins=4)
 ax1.invert_yaxis()
 ax2.invert_yaxis()
 ax3.invert_yaxis()
+ax4.invert_yaxis()
 savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output data figures\dataprofiles_{}_{}.png".format(Leg, Site))
 
 ###############################################################################
@@ -486,8 +514,8 @@ ax4.plot(concdata[:,1], concdata[:,0], 'go', label='Measured', mfc='None')
 ax5.plot(modelrate_avg*1000000, intervaldepths[1:-1], 'k-', label='Average', mfc='None')
 # ax5.plot(modelratesmooth*1000000, intervaldepths[1:-1])
 ax5.plot(modelrate_modern*1000000, intervaldepths[1:-1], 'b-', label='Modern', mfc='None')
-ax4.legend(loc='lower right', fontsize='small')
-ax5.legend(loc='lower right', fontsize='small')
+ax4.legend(loc='best', fontsize='small')
+ax5.legend(loc='best', fontsize='small')
 ax4.set_ylabel('Depth (mbsf)')
 ax4.set_xlabel('Concentration (mM)')
 ax5.set_xlabel('Reaction Rate x 10^-6')
