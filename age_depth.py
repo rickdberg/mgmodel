@@ -3,6 +3,12 @@
 Created on Tue Aug  2 17:49:51 2016
 
 @author: rickdberg
+Script for building age-depth profile from biostratigraphy or magnetostratigraphy
+data. 
+Boundaries between different sedimentation rates are manually input based on 
+visual inspection of data.
+Bottom boundary can be specified.
+Inputs: Leg, Site, Hole(s), bottom_boundary, sedimentation rate boundaries (age_depth_boundaries)
 """
 
 
@@ -26,8 +32,7 @@ Leg = '315'
 Site = 'C0001'
 Holes = "('E','F','H','B')"
 Bottom_boundary = 'none' # 'none', or a depth
-age_depth_boundaries = [0, 7, 15, 23, 29] # Index when sorted by age
-Hole = ''.join(filter(str.isalpha, Holes))
+age_depth_boundaries = [0, 7, 14, 24, 30] # Index when sorted by age
 
 ###############################################################################
 ###############################################################################
@@ -54,8 +59,11 @@ if Bottom_boundary == 'none':
 else:
     deepest_sed_idx = np.searchsorted(sed[:,0], Bottom_boundary)
     sed = sed[:deepest_sed_idx, :]
-# sedfit = np.polyfit(sed[:,0], sed[:,1], 4)
 
+# Sort by age
+sed = sed[np.argsort(sed[:,1])]
+
+'''
 # Averaging function (from http://stackoverflow.com/questions/4022465/average-the-duplicated-values-from-two-paired-lists-in-python)
 # Altered to sort by age, not depth
 def averages(names, values):
@@ -77,7 +85,7 @@ def averages(names, values):
 
 # Age-depth data after averaging and do piece-wise linear regression on age-depth data
 sed = averages(sed[:,0], sed[:,1])
-
+'''
 
 # Put in for loop to run linear regressions for as many sections as each site has
 
@@ -106,7 +114,8 @@ for n in np.arange(len(cut_depths)-1):
     sedrate_depths.append(last_depth)
 plt.show()
 
-
+# Formatting for input into SQL database metadata table
+Hole = ''.join(filter(str.isalpha, Holes))
 
 
 
