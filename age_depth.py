@@ -3,29 +3,22 @@
 Created on Tue Aug  2 17:49:51 2016
 
 @author: rickdberg
-Script for building age-depth profile from biostratigraphy or magnetostratigraphy
-data. 
-Boundaries between different sedimentation rates are manually input based on 
-visual inspection of data.
-Bottom boundary can be specified.
-Inputs: Leg, Site, Hole(s), bottom_boundary, sedimentation rate boundaries (age_depth_boundaries)
-"""
+Script for building age-depth profile from biostratigraphy or
+magnetostratigraphy data.
 
+Boundaries between different sedimentation rates are manually input based on
+visual inspection of data.
+
+Bottom boundary can be specified.
+
+Inputs: Leg, Site, Hole(s), bottom_boundary, sedimentation rate
+boundaries (age_depth_boundaries)
+"""
 
 import numpy as np
 import pandas as pd
-import scipy as sp
 import MySQLdb
-import datetime
-import os
-import math
 import matplotlib.pyplot as plt
-import scipy.ndimage as ndimage
-from scipy.interpolate import interp1d
-from scipy import optimize, integrate
-from collections import defaultdict
-import matplotlib.gridspec as gridspec
-from pylab import savefig
 
 # Site ID
 Leg = '315'
