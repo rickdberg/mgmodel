@@ -30,12 +30,19 @@ Final rate output is in mol m-3 (bulk sediment) y-1
 Units: meters, years, mol m**-3 (aka mM), Celsius.
 Positive values of reaction rate indicate uptake into sediment.
 
-
-
-!!!!!!!!!!!!!!!!Must change sed rate profile calc as in centraldiff_dmg and simple_flux!!!!!!!!!!!!
-
 [Column, Row]
+
+
+run model on each isotope
+
+save rxn rate profile
+
+calculate epsilon values 26/24
+
+save epsilon profiles
+
 """
+
 import numpy as np
 import pandas as pd
 import scipy as sp
@@ -57,9 +64,8 @@ Date = datetime.date.today()
 # Site ID
 Leg = '315'
 Site = 'C0001'
-Holes = "('E','F','H','B')"
+Holes = "('E','F','H')"
 Bottom_boundary = 'none' # 'none', or a depth
-age_depth_boundaries = [0, 7, 15, 23, 29] # Index when sorted by age
 Hole = ''.join(filter(str.isalpha, Holes))
 
 # Model parameters
@@ -81,9 +87,10 @@ precision = 0.02  # measurement precision
 user = 'root'
 passwd = 'neogene227'
 host = '127.0.0.1'
-db = 'iodp'
-conctable = 'iw_chikyu'
+db = 'iodp_compiled'
+conctable = 'iw_all'
 portable = 'mad_all'
+isotopetable = 'mg_isotopes'
 con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
 
 # Pore water chemistry data
@@ -98,7 +105,19 @@ else:
     concdata = concdata[:deepest_iw_idx, :]
 
 ct0 = [54.0]  # [concdata[0, 1]]  # mol per m^3 in modern average seawater at specific site
-datapoints = len(concdata) # Used to insert into metadata and set number of intervals
+
+# Mg isotope data, combined with corresponding Mg concentrations
+
+sql = """select mg_isotopes.sample_depth, mg_isotopes.d26mg, mg_isotopes.d25mg, iw_all.Mg
+from mg_isotopes join iw_all
+on mg_isotopes.iw_index = iw_all.iw_index
+where mg_isotopes.leg = '{}' and mg_isotopes.site = '{}' and mg_isotopes.hole in {} and d26mg is not NULL;""".format(Leg, Site, Holes)
+isotopedata = pd.read_sql(sql, con)
+isotopedata = isotopedata.sort_values(by='sample_depth')
+isotopedata = isotopedata.as_matrix()
+
+it0 = [-0.82]  # dMg in modern average seawater
+datapoints = len(isotopedata) # Used to insert into metadata and set number of intervals
 def round_down_to_even(f):
      return math.floor(f / 2.) * 2
 intervals = round_down_to_even(datapoints)  # Number of intervals
@@ -115,35 +134,46 @@ salinity = salinity.as_matrix()
 salinityval = (salinity[:,1]+3900)/3900*34.7 # Modern day avg salinity 34.7 from (ref), depth of ocean from (ref)
 salinity = np.column_stack((salinity[:,0], salinityval)) # Avg salinity vs time
 
-# Temperature gradient
+# Temperature gradient (degrees C/m)
 sql = """SELECT temp_gradient FROM site_summary where leg = '{}' and site = '{}';""".format(Leg, Site)
 temp_gradient = pd.read_sql(sql, con)
 temp_gradient = temp_gradient.iloc[0,0]
-# Bottom water temp
+
+# Bottom water temp (degrees C)
 sql = """SELECT bottom_water_temp FROM site_summary where leg = '{}' and site = '{}';""".format(Leg, Site)
 bottom_temp = pd.read_sql(sql, con)
 bottom_temp = bottom_temp.iloc[0,0]
+
 # Temperature profile (degrees C)
 def sedtemp(z, bottom_temp):
     return bottom_temp + np.multiply(z, temp_gradient)
 
-# Advection rate
+# Advection rate (m/y)
 sql = """SELECT advection_rate FROM site_summary where leg = '{}' and site = '{}';""".format(Leg, Site)
 advection = pd.read_sql(sql, con)
 advection = advection.iloc[0,0]
 
 # Sedimentation rate profile (m/y)
-# Note: Input data must have time at depth=0
-sql = """SELECT depth, age FROM age_depth where leg = '{}' and site = '{}' order by 1 ;""".format(Leg, Site)
-sed = pd.read_sql(sql, con)
-sed = sed.as_matrix()
-sed = sed[np.argsort(sed[:,0])]
-if Bottom_boundary == 'none':
-    sed = sed
-else:
-    deepest_sed_idx = np.searchsorted(sed[:,0], Bottom_boundary)
-    sed = sed[:deepest_sed_idx, :]
-# sedfit = np.polyfit(sed[:,0], sed[:,1], 4)
+# Get sedimentation rates from database
+sql = """SELECT sedrate_ages, sedrate_depths FROM metadata_sed_rate where leg = '{}' and site = '{}' ; """.format(Leg, Site)
+sedratedata = pd.read_sql(sql, con)
+sedratedata = sedratedata.sort_values(by='sedrate_depths')
+
+sedtimes = np.asarray(sedratedata.iloc[:,0][0][1:-1].split(","))
+seddepths = np.asarray(sedratedata.iloc[:,1][0][1:-1].split(","))
+sedtimes = sedtimes.astype(np.float)
+seddepths = seddepths.astype(np.float)
+sedrates = np.diff(seddepths, axis=0)/np.diff(sedtimes, axis=0)  # m/y
+
+###############################################################################
+# Calculate Mg isotope concentrations
+
+mg26_24 = ((isotopedata[:,1]/1000)+1)*0.13979
+mg25_24 = ((isotopedata[:,2]/1000)+1)*0.13979
+mg24conc = isotopedata[:,3]/(mg26_24+mg25_24+1)
+mg25conc = mg24conc*mg25_24
+mg26conc = mg24conc*mg26_24
+
 
 ###############################################################################
 # Average duplicates in concentration and porosity datasets
@@ -165,27 +195,6 @@ def averages(names, values):
     resultvalues = np.array(list(result.values()))
     sorted = np.column_stack((resultkeys[np.argsort(resultkeys)], resultvalues[np.argsort(resultkeys)]))
     return sorted
-
-# Age-depth data after averaging and do piece-wise linear regression on age-depth data
-sed = averages(sed[:,0], sed[:,1])
-sed = np.column_stack((sed[:,0][np.argsort(sed[:,1])], sed[:,1][np.argsort(sed[:,1])]))
-
-def age_curve(z, p):
-    return p*z
-
-cut_depths = sed[age_depth_boundaries, 0]
-last_depth = 0
-last_age = 0
-sedrate_ages = [0]
-sedrate_depths = [0]
-for n in np.arange(len(cut_depths)-1):
-    next_depth = cut_depths[n+1]
-    sed_alt = np.stack((sed[:,0]-last_depth, sed[:,1]-last_age), axis=1)
-    p , e = optimize.curve_fit(age_curve, sed_alt[age_depth_boundaries[n]:age_depth_boundaries[n+1],0], sed_alt[age_depth_boundaries[n]:age_depth_boundaries[n+1],1])
-    last_age = age_curve(next_depth-last_depth, *p)+last_age
-    last_depth = cut_depths[n+1]
-    sedrate_ages.append(last_age)
-    sedrate_depths.append(last_depth)
 
 # Concentration vector after averaging duplicates
 concunique = averages(concdata[:, 0], concdata[:, 1])
@@ -291,10 +300,6 @@ def Dst(Td, T):
 ###############################################################################
 # Calculate ages at depth intervals and get age at lowest pore water measurement
 
-# Get sedimentation rates from age-depth data
-sedtimes = np.asarray(sedrate_ages)
-seddepths = np.asarray(sedrate_depths)
-sedrates = np.diff(seddepths, axis=0)/np.diff(sedtimes, axis=0)  # m/y
 
 # Function for appending float to array and trimming the sorted array to have 
 # that value at end of the array
@@ -530,11 +535,11 @@ savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output 
 
 
 # Save reaction rate and porosity data in csv files
-avg_modelrates = np.column_stack((intervaldepths[1:-1], modelratesmooth))
-full_modelrates = modelrates
+modelrate_modern_isotopes = np.column_stack((intervaldepths[1:-1], modelrate_modern_24, modelrate_modern_25, modelrate_modern_26))
+full_modelrates_isotopes = modelrates
 modelporosity = np.column_stack((intervaldepths, porosity))
 np.savetxt(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output porosity data\modelporosity_{}_{}.csv".format(Leg, Site), modelporosity, delimiter="\t")
-np.savetxt(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output rate data\avg_modelrates_{}_{}.csv".format(Leg, Site), avg_modelrates, delimiter="\t")
-np.savetxt(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output rate data\full_modelrates_{}_{}.csv".format(Leg, Site), full_modelrates, delimiter="\t")
+np.savetxt(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output rate data\avg_modelrates_{}_{}.csv".format(Leg, Site), avg_modelrates_isotopes, delimiter="\t")
+np.savetxt(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output rate data\full_modelrates_{}_{}.csv".format(Leg, Site), full_modelrates_isotopes, delimiter="\t")
 
 # eof

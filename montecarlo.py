@@ -111,7 +111,7 @@ pl.savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Outp
 user = 'root'
 passwd = 'neogene227'
 host = '127.0.0.1'
-db = 'iodp'
+db = 'iodp_compiled'
 con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
 cur = con.cursor()
 

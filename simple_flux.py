@@ -30,10 +30,6 @@ Final rate output is in mol m-3 (bulk sediment) y-1
 Units: meters, years, mol m**-3 (aka mM), Celsius.
 Positive values of reaction rate indicate uptake into sediment.
 
-
-
-!!!!!!!!!!!!!!!!Must change sed rate profile calc as in centraldiff_dmg and simple_flux!!!!!!!!!!!!
-
 [Column, Row]
 """
 import numpy as np
@@ -59,7 +55,6 @@ Leg = '315'
 Site = 'C0001'
 Holes = "('E','F','H','B')"
 Bottom_boundary = 'none' # 'none', or a depth
-age_depth_boundaries = [0, 7, 15, 23, 29] # Index when sorted by age
 Hole = ''.join(filter(str.isalpha, Holes))
 
 # Model parameters
@@ -107,13 +102,6 @@ intervals = round_down_to_even(datapoints)  # Number of intervals
 sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and coalesce(method,'C') like '%C%'  and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
 pordata = pd.read_sql(sql, con)
 pordata = pordata.as_matrix()
-
-# Sea level data for salinity
-sql = "SELECT age, sealevel FROM sealevel"
-salinity = pd.read_sql(sql, con)
-salinity = salinity.as_matrix()
-salinityval = (salinity[:,1]+3900)/3900*34.7 # Modern day avg salinity 34.7 from (ref), depth of ocean from (ref)
-salinity = np.column_stack((salinity[:,0], salinityval)) # Avg salinity vs time
 
 # Temperature gradient
 sql = """SELECT temp_gradient FROM site_summary where leg = '{}' and site = '{}';""".format(Leg, Site)
@@ -166,26 +154,17 @@ def averages(names, values):
     sorted = np.column_stack((resultkeys[np.argsort(resultkeys)], resultvalues[np.argsort(resultkeys)]))
     return sorted
 
-# Age-depth data after averaging and do piece-wise linear regression on age-depth data
-sed = averages(sed[:,0], sed[:,1])
-sed = np.column_stack((sed[:,0][np.argsort(sed[:,1])], sed[:,1][np.argsort(sed[:,1])]))
+# Sedimentation rate profile (m/y)
+# Get sedimentation rates from database
+sql = """SELECT sedrate_ages, sedrate_depths FROM metadata_sed_rate where leg = '{}' and site = '{}' ; """.format(Leg, Site)
+sedratedata = pd.read_sql(sql, con)
+sedratedata = sedratedata.sort_values(by='sedrate_depths')
 
-def age_curve(z, p):
-    return p*z
-
-cut_depths = sed[age_depth_boundaries, 0]
-last_depth = 0
-last_age = 0
-sedrate_ages = [0]
-sedrate_depths = [0]
-for n in np.arange(len(cut_depths)-1):
-    next_depth = cut_depths[n+1]
-    sed_alt = np.stack((sed[:,0]-last_depth, sed[:,1]-last_age), axis=1)
-    p , e = optimize.curve_fit(age_curve, sed_alt[age_depth_boundaries[n]:age_depth_boundaries[n+1],0], sed_alt[age_depth_boundaries[n]:age_depth_boundaries[n+1],1])
-    last_age = age_curve(next_depth-last_depth, *p)+last_age
-    last_depth = cut_depths[n+1]
-    sedrate_ages.append(last_age)
-    sedrate_depths.append(last_depth)
+sedtimes = np.asarray(sedratedata.iloc[:,0][0][1:-1].split(","))
+seddepths = np.asarray(sedratedata.iloc[:,1][0][1:-1].split(","))
+sedtimes = sedtimes.astype(np.float)
+seddepths = seddepths.astype(np.float)
+sedrates = np.diff(seddepths, axis=0)/np.diff(sedtimes, axis=0)  # m/y
 
 # Concentration vector after averaging duplicates
 concunique = averages(concdata[:, 0], concdata[:, 1])
@@ -290,11 +269,6 @@ def Dst(Td, T):
 
 ###############################################################################
 # Calculate ages at depth intervals and get age at lowest pore water measurement
-
-# Get sedimentation rates from age-depth data
-sedtimes = np.asarray(sedrate_ages)
-seddepths = np.asarray(sedrate_depths)
-sedrates = np.diff(seddepths, axis=0)/np.diff(sedtimes, axis=0)  # m/y
 
 # Function for appending float to array and trimming the sorted array to have 
 # that value at end of the array

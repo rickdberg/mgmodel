@@ -9,22 +9,25 @@ magnetostratigraphy data.
 Boundaries between different sedimentation rates are manually input based on
 visual inspection of data.
 
-Bottom boundary can be specified.
-
-Inputs: Leg, Site, Hole(s), bottom_boundary, sedimentation rate
-boundaries (age_depth_boundaries)
+Inputs: Leg, Site, Hole(s), bottom_boundary, age_depth_boundaries
 """
 
 import numpy as np
 import pandas as pd
 import MySQLdb
 import matplotlib.pyplot as plt
+from scipy import optimize, integrate
+import os
+import datetime
+
+Script = os.path.basename(__file__)
+Date = datetime.date.today()
 
 # Site ID
 Leg = '315'
-Site = 'C0001'
-Holes = "('E','F','H','B')"
-Bottom_boundary = 'none' # 'none', or a depth
+Site = 'C0002'
+Holes = "('E','F','H', 'K', 'L', 'J', 'M', 'P', 'D', 'B')"
+Bottom_boundary = 'none' # 'none', or an integer depth
 age_depth_boundaries = [0, 7, 14, 24, 30] # Index when sorted by age
 
 ###############################################################################
@@ -36,10 +39,9 @@ age_depth_boundaries = [0, 7, 14, 24, 30] # Index when sorted by age
 user = 'root'
 passwd = 'neogene227'
 host = '127.0.0.1'
-db = 'iodp'
-conctable = 'iw_chikyu'
-portable = 'mad_all'
+db = 'iodp_compiled'
 con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
+cur = con.cursor()
 
 # Sedimentation rate profile (m/y)
 # Note: Input data must have time at depth=0
@@ -55,30 +57,7 @@ else:
 
 # Sort by age
 sed = sed[np.argsort(sed[:,1])]
-
-'''
-# Averaging function (from http://stackoverflow.com/questions/4022465/average-the-duplicated-values-from-two-paired-lists-in-python)
-# Altered to sort by age, not depth
-def averages(names, values):
-    # Group the items by name
-    value_lists = defaultdict(list)
-    for name, value in zip(names, values):
-        value_lists[name].append(value)
-
-    # Take the average of each list
-    result = {}
-    for name, values in value_lists.items():
-        result[name] = sum(values) / float(len(values))
-    
-    # Make it a Numpy array and pull out values
-    resultkeys = np.array(list(result.keys()))
-    resultvalues = np.array(list(result.values()))
-    sorted = np.column_stack((resultkeys[np.argsort(resultvalues)], resultvalues[np.argsort(resultvalues)]))
-    return sorted
-
-# Age-depth data after averaging and do piece-wise linear regression on age-depth data
-sed = averages(sed[:,0], sed[:,1])
-'''
+datapoints = len(sed)
 
 # Put in for loop to run linear regressions for as many sections as each site has
 
@@ -89,7 +68,6 @@ plt.figure()
 plt.plot(sed[:,1], sed[:,0], "o")
 
 cut_depths = sed[age_depth_boundaries, 0]
-cut_ages = sed[age_depth_boundaries, 1]
 last_depth = 0
 last_age = 0
 sedrate_ages = [0]
@@ -110,8 +88,15 @@ plt.show()
 # Formatting for input into SQL database metadata table
 Hole = ''.join(filter(str.isalpha, Holes))
 
+# Save metadata in database
+cur.execute("""select site_key from site_summary where leg = '{}' and site = '{}' ;""".format(Leg, Site))
+site_key = cur.fetchone()[0]
+cur.execute("""insert into metadata_sed_rate (site_key, leg, site, hole, 
+bottom_boundary, age_depth_boundaries, sedrate_ages, sedrate_depths, datapoints, script, run_date) 
+VALUES ({}, '{}', '{}', '{}', '{}', '{}', '{}', '{}', {}, '{}', '{}')  ON DUPLICATE KEY UPDATE hole='{}', 
+bottom_boundary='{}', age_depth_boundaries='{}', sedrate_ages='{}', sedrate_depths='{}', datapoints={},
+script='{}', run_date='{}' ;""".format(site_key, Leg, Site, Hole, Bottom_boundary, age_depth_boundaries, sedrate_ages, sedrate_depths, datapoints, Script, Date, 
+Hole, Bottom_boundary, age_depth_boundaries, sedrate_ages, sedrate_depths, datapoints, Script, Date))
+con.commit()
 
-
-
-
-
+# eof
