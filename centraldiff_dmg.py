@@ -41,6 +41,10 @@ calculate epsilon values 26/24
 
 save epsilon profiles
 
+
+Change 25/24std ratio in calculation
+
+
 """
 
 import numpy as np
@@ -63,8 +67,8 @@ Date = datetime.datetime.now()
 
 # Site ID
 Leg = '315'
-Site = 'C0001'
-Holes = "('E','F','H')"
+Site = 'C0002'
+Holes = "('B', 'D', 'H', 'J', 'K', 'L', 'M', 'P')"
 Bottom_boundary = 'none' # 'none', or a depth
 Hole = ''.join(filter(str.isalpha, Holes))
 
@@ -106,22 +110,6 @@ else:
 
 ct0 = [54.0]  # [concdata[0, 1]]  # mol per m^3 in modern average seawater at specific site
 
-# Mg isotope data, combined with corresponding Mg concentrations
-
-sql = """select mg_isotopes.sample_depth, mg_isotopes.d26mg, mg_isotopes.d25mg, iw_all.Mg
-from mg_isotopes join iw_all
-on mg_isotopes.iw_index = iw_all.iw_index
-where mg_isotopes.leg = '{}' and mg_isotopes.site = '{}' and mg_isotopes.hole in {} and d26mg is not NULL;""".format(Leg, Site, Holes)
-isotopedata = pd.read_sql(sql, con)
-isotopedata = isotopedata.sort_values(by='sample_depth')
-isotopedata = isotopedata.as_matrix()
-
-it0 = [-0.82]  # dMg in modern average seawater
-datapoints = len(isotopedata) # Used to insert into metadata and set number of intervals
-def round_down_to_even(f):
-     return math.floor(f / 2.) * 2
-intervals = round_down_to_even(datapoints)  # Number of intervals
-
 # Porosity data
 sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and coalesce(method,'C') like '%C%'  and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
 pordata = pd.read_sql(sql, con)
@@ -135,12 +123,12 @@ salinityval = (salinity[:,1]+3900)/3900*34.7 # Modern day avg salinity 34.7 from
 salinity = np.column_stack((salinity[:,0], salinityval)) # Avg salinity vs time
 
 # Temperature gradient (degrees C/m)
-sql = """SELECT temp_gradient FROM site_summary where leg = '{}' and site = '{}';""".format(Leg, Site)
+sql = """SELECT temp_gradient FROM site_info where leg = '{}' and site = '{}';""".format(Leg, Site)
 temp_gradient = pd.read_sql(sql, con)
 temp_gradient = temp_gradient.iloc[0,0]
 
 # Bottom water temp (degrees C)
-sql = """SELECT bottom_water_temp FROM site_summary where leg = '{}' and site = '{}';""".format(Leg, Site)
+sql = """SELECT bottom_water_temp FROM site_info where leg = '{}' and site = '{}';""".format(Leg, Site)
 bottom_temp = pd.read_sql(sql, con)
 bottom_temp = bottom_temp.iloc[0,0]
 
@@ -149,7 +137,7 @@ def sedtemp(z, bottom_temp):
     return bottom_temp + np.multiply(z, temp_gradient)
 
 # Advection rate (m/y)
-sql = """SELECT advection_rate FROM site_summary where leg = '{}' and site = '{}';""".format(Leg, Site)
+sql = """SELECT advection_rate FROM site_info where leg = '{}' and site = '{}';""".format(Leg, Site)
 advection = pd.read_sql(sql, con)
 advection = advection.iloc[0,0]
 
@@ -164,16 +152,6 @@ seddepths = np.asarray(sedratedata.iloc[:,1][0][1:-1].split(","))
 sedtimes = sedtimes.astype(np.float)
 seddepths = seddepths.astype(np.float)
 sedrates = np.diff(seddepths, axis=0)/np.diff(sedtimes, axis=0)  # m/y
-
-###############################################################################
-# Calculate Mg isotope concentrations
-
-mg26_24 = ((isotopedata[:,1]/1000)+1)*0.13979
-mg25_24 = ((isotopedata[:,2]/1000)+1)*0.13979
-mg24conc = isotopedata[:,3]/(mg26_24+mg25_24+1)
-mg25conc = mg24conc*mg25_24
-mg26conc = mg24conc*mg26_24
-
 
 ###############################################################################
 # Average duplicates in concentration and porosity datasets
@@ -220,6 +198,49 @@ def runningmean(arr, window):
     padded = np.append(np.append(prepad, arr), postpad)
     cumsum = np.cumsum(np.insert(padded, 0, 0))
     return (cumsum[window:] - cumsum[:-window])/window
+    
+###############################################################################
+# Mg isotope data, combined with corresponding Mg concentrations
+
+sql = """select mg_isotopes.sample_depth, mg_isotopes.d26mg, mg_isotopes.d25mg
+from mg_isotopes
+where mg_isotopes.leg = '{}' and mg_isotopes.site = '{}' and mg_isotopes.hole in {} and d26mg is not NULL;""".format(Leg, Site, Holes)
+isotopedata = pd.read_sql(sql, con)
+isotopedata = isotopedata.sort_values(by='sample_depth')
+isotopedata = pd.merge(isotopedata.iloc[:,0:3], pd.DataFrame(concunique, columns = ['sample_depth', 'mg_conc']), how = 'inner', on = 'sample_depth')
+isotopedata = isotopedata.as_matrix()
+
+d26sw = [-0.82]  # d26Mg in modern average seawater
+d25sw = [-0.39]  # d25Mg in modern average seawater
+
+# Add seawater values (upper boundary condition, dirichlet) to profiles
+isotopedata = np.concatenate((np.array(([0],d26sw, d25sw, ct0)).T, isotopedata), axis=0)
+
+datapoints = len(isotopedata) # Used to insert into metadata and set number of intervals
+def round_down_to_even(f):
+     return math.floor(f / 2.) * 2
+intervals = round_down_to_even(datapoints)  # Number of intervals
+
+# Calculate Mg isotope concentrations
+# Source for 26/24std: Isotope Geochemistry, William White, pp.365
+
+mg26_24 = ((isotopedata[:,1]/1000)+1)*0.13979
+mg25_24 = ((isotopedata[:,2]/1000)+1)*0.126598
+mg24conc = isotopedata[:,3]/(mg26_24+mg25_24+1)
+mg25conc = mg24conc*mg25_24
+mg26conc = mg24conc*mg26_24
+
+###############################################################################
+# Isotope data preparation
+
+
+# Add lower boundary condition (constant, set at lowest measurement, dirichlet)
+cb_26 = isotopedata[-1, 1]
+cb_25 = isotopedata[-1, 2]
+
+# Make interpolation function for individual isotope concentrations
+concinterp_d26 = interp1d(isotopedata[:,0], mg26conc, kind='linear')
+concinterp_d25 = interp1d(isotopedata[:,0], mg25conc, kind='linear')
 
 ###############################################################################
 # Concentration data preparation
@@ -240,7 +261,7 @@ aftconc2 = concpad[4:conplen]
 
 concsmooth = np.column_stack((concunique[:,0], (befconc2*0.06+befconc1*0.24+concunique[:,1]*0.4+aftconc1*0.24+aftconc2*0.06)))
 '''
-# Smooth concentrations using 5-point gaussian using reflect at edges
+# Smooth concentrations using 1-std-deviation gaussian using reflect at edges
 concsmooth = np.column_stack((concunique[:,0], (ndimage.filters.gaussian_filter1d(concunique[:,1], 1, axis=0, mode='reflect'))))
 
 concprocessed = concsmooth  #Seawater value added, duplicates averaged, smoothed data
