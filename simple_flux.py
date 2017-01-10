@@ -48,7 +48,7 @@ import matplotlib.gridspec as gridspec
 from pylab import savefig
 
 Script = os.path.basename(__file__)
-Date = datetime.date.today()
+Date = datetime.datetime.now()
 
 # Site ID
 Leg = '315'

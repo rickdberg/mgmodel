@@ -21,14 +21,14 @@ import os
 import datetime
 
 Script = os.path.basename(__file__)
-Date = datetime.date.today()
+Date = datetime.datetime.now()
 
 # Site ID
 Leg = '315'
 Site = 'C0002'
-Holes = "('E','F','H', 'K', 'L', 'J', 'M', 'P', 'D', 'B')"
+Holes = "('D', 'B')"
 Bottom_boundary = 'none' # 'none', or an integer depth
-age_depth_boundaries = [0, 7, 14, 24, 30] # Index when sorted by age
+age_depth_boundaries = [0, 3, 15, 34] # Index when sorted by age
 
 ###############################################################################
 ###############################################################################
@@ -89,7 +89,7 @@ plt.show()
 Hole = ''.join(filter(str.isalpha, Holes))
 
 # Save metadata in database
-cur.execute("""select site_key from site_summary where leg = '{}' and site = '{}' ;""".format(Leg, Site))
+cur.execute("""select site_key from site_info where leg = '{}' and site = '{}' ;""".format(Leg, Site))
 site_key = cur.fetchone()[0]
 cur.execute("""insert into metadata_sed_rate (site_key, leg, site, hole, 
 bottom_boundary, age_depth_boundaries, sedrate_ages, sedrate_depths, datapoints, script, run_date) 
