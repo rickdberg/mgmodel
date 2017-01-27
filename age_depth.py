@@ -28,7 +28,7 @@ Leg = '315'
 Site = 'C0002'
 Holes = "('D', 'B')"
 Bottom_boundary = 'none' # 'none', or an integer depth
-age_depth_boundaries = [0, 3, 15, 34] # Index when sorted by age
+age_depth_boundaries = [0, 4, 16, 35] # Index when sorted by age
 
 ###############################################################################
 ###############################################################################
