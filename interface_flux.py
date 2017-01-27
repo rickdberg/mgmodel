@@ -8,12 +8,10 @@ Script to calculate sediment-water interface fluxes of a dissolved constituent
 
 Uses central difference formula of a spline fit to the upper sediment section
 
-Add in pw burial flux
-Add in capability to handle advection at surface
-How to deal with tortuosity change w depth?
-Add in appropriate bottom boundary
-Add in concentration spline fit
-Add in interpolated depths/thicknesses
+Must run age-depth.py for site first
+
+
+How to deal with tortuosity and Dsed change w depth?
 Add in plotting of input data, processed data, and results
 
 
@@ -24,6 +22,7 @@ import matplotlib.pyplot as plt
 import MySQLdb
 import os
 import datetime
+from scipy import interpolate
 
 Script = os.path.basename(__file__)
 Date = datetime.datetime.now()
@@ -33,7 +32,7 @@ Date = datetime.datetime.now()
 Leg = '315'
 Site = 'C0002'
 Holes = "('B', 'D', 'H', 'J', 'K', 'L', 'M', 'P')"
-Bottom_boundary = 'none' # 'none', or a depth
+Advection = 0  # External (hydrothermal) advection at surface
 Hole = ''.join(filter(str.isalpha, Holes))  # Formatting for saving in metadata
 
 # Species parameters
@@ -41,6 +40,7 @@ Solute = 'Mg'
 Ds = 1.875*10**-2  # m^2 per year free diffusion coefficient at 18C (ref?)
 TempD = 18  # Temperature at which diffusion coefficient is known
 Precision = 0.02  # measurement precision
+Ocean = 54.0  # Concentration in modern ocean (mM)
 
 ###############################################################################
 ###############################################################################
@@ -62,13 +62,8 @@ sql = """SELECT sample_depth, {} FROM {} where leg = '{}' and site = '{}' and ho
 concdata = pd.read_sql(sql, con)
 concdata = concdata.sort_values(by='sample_depth')
 concdata = concdata.as_matrix()
-if Bottom_boundary == 'none':
-    concdata = concdata
-else:
-    deepest_iw_idx = np.searchsorted(concdata[:,0], Bottom_boundary)
-    concdata = concdata[:deepest_iw_idx, :]
 
-ct0 = [54.0]  # [concdata[0, 1]]  # mol per m^3 in modern average seawater at specific site
+ct0 = [Ocean]  # mol per m^3 in modern average seawater at specific site
 
 # Porosity data
 sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and coalesce(method,'C') like '%C%'  and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
@@ -94,8 +89,7 @@ sql = """SELECT advection_rate FROM site_info where leg = '{}' and site = '{}';"
 advection = pd.read_sql(sql, con)
 advection = advection.iloc[0,0]
 
-# Sedimentation rate profile (m/y)
-# Get sedimentation rates from database
+# Sedimentation rate profile (m/y) (Calculated from age_depth.py)
 sql = """SELECT sedrate_ages, sedrate_depths FROM metadata_sed_rate where leg = '{}' and site = '{}' ; """.format(Leg, Site)
 sedratedata = pd.read_sql(sql, con)
 sedratedata = sedratedata.sort_values(by='sedrate_depths')
@@ -107,7 +101,7 @@ seddepths = seddepths.astype(np.float)
 sedrates = np.diff(seddepths, axis=0)/np.diff(sedtimes, axis=0)  # m/y
 sedrate = sedrates[0]
 
-# Load age-depth data for plots
+# Load age-depth data for plots  (From age_depth.py)
 sql = """SELECT depth, age FROM age_depth where leg = '{}' and site = '{}' order by 1 ;""".format(Leg, Site)
 picks = pd.read_sql(sql, con)
 picks = picks.as_matrix()
@@ -120,7 +114,7 @@ else:
 picks = picks[np.argsort(picks[:,1])]
 
 ###############################################################################
-# Average duplicates in concentration and porosity datasets
+# Average duplicates in concentration dataset, add seawater value, and make spline fit to first three values
 
 # Averaging function (from http://stackoverflow.com/questions/4022465/average-the-duplicated-values-from-two-paired-lists-in-python)
 def averages(names, values):
@@ -142,25 +136,39 @@ def averages(names, values):
 
 # Concentration vector after averaging duplicates
 concunique = averages(concdata[:, 0], concdata[:, 1])
-##### Remove for analytical tests ###### Adds value ct0 at seafloor
 concunique = np.concatenate((np.array(([0],ct0)).T, concunique), axis=0)
 
-# Porosity vector
-por = averages(pordata[:, 0], pordata[:, 1])
+# Spline fit to first 4 unique concentration values
+spline_function = interpolate.splrep(concunique[:4,0], concunique[:4,1], k=3)
+intervalthickness = 1  # meters
+conc_interp_depths = np.arange(0,3,intervalthickness)  # Zero to 2 meters
+conc_interp = interpolate.splev(conc_interp_depths, spline_function, der=0)
 
 ###############################################################################
-# Porosity data preparation
+# Porosity and solids fraction functions and data preparation
 
+# Porosity vectors
+por = averages(pordata[:, 0], pordata[:, 1])  # Average duplicates
 porvalues = por[:, 1]
 pordepth = por[:, 0]
 
-# Porosity curve fit (ref?) (Makes porosity at sed surface equal to first measurement)
+# Porosity curve fit (ref?) (Makes porosity at sed surface equal to average of first 3 measurements)
 def porcurve(z, a):
-    portop = np.max(por[:3, 1])
-    porbottom = por[-1, 1]
+    portop = np.max(por[:3, 1])  # Averages top 3 porosity measurements for upper porosity boundary
+    porbottom = por[-1, 1]  # Takes lowest porosity measurement as the lower boundary
     return (portop-porbottom) * np.exp(-a*z) + porbottom
 
 porfit, porcov = optimize.curve_fit(porcurve, pordepth, porvalues)
+
+#Sediment properties
+porosity = porcurve(conc_interp_depths, porfit)
+tortuosity = 1-np.log(porosity**2)
+
+# Solids curve fit (based on porosity curve fit function)
+def solidcurve(z, a):
+    portop = por[0, 1]
+    porbottom = por[-1, 1]
+    return 1-((portop-porbottom) * np.exp(-a*z) + porbottom)
 
 ###############################################################################
 # Diffusion coefficient function
@@ -184,28 +192,64 @@ def Dst(Td, T):
     Td = Td+273.15
     return T/vis*visd*Ds/Td  # Stokes-Einstein equation
 
+Dsed = Dst(TempD, bottom_temp)/tortuosity[0]  # Effective diffusion coefficient
 
+###############################################################################
+# Pore water burial mass flux
 
+# Sediment mass (1-dimensional volume of solids) accumulation rates for each age-depth section
+# Assumes constant sediment mass (really volume of solids) accumulation rates between age-depth measurements
+sectionmass = (integrate.quad(solidcurve, seddepths[0], seddepths[1], args=(porfit)))[0]
+sedmassrate = (sectionmass/np.diff(sedtimes)[0])
+
+# Pore water burial flux calculation (ref?)
+deeppor = porcurve(pordepth[-1], porfit)
+deepsolid = solidcurve(pordepth[-1], porfit)
+pwburialflux = deeppor*sedmassrate/deepsolid
 
 ###############################################################################
 # Flux model # Needs work
 
-#Sediment properties
-porosity = porcurve(intervaldepths, porfit)
-tortuosity = 1-np.log(porosity**2)
-Dsed = Dst(TempD, sedtemp(intervaldepths, bottom_temp))/tortuosity  # Effective diffusion coefficient
-
-# Pore water burial flux at each time step
-deeppor = porcurve(pordepth[-1], porfit)
-deepsolid = solidcurve(pordepth[-1], porfit)
-pwburialflux = np.zeros([timesteps,1])
-for i in np.arange(len(sedmassratetime)):
-    pwburial = deeppor*sedmassratetime[i]/deepsolid
-    pwburialflux[i] = np.flipud(pwburial)
-
 gradient = (-3*conc_interp[0] + 4*conc_interp[1] - conc_interp[2])/(2*intervalthickness)
 
-flux = Dsed * gradient + (porcurve(pordepth[0], porfit) * advection + pwburialflux) * conc_interp[0]
+flux = porcurve(pordepth[0], porfit) * Dsed * gradient + (porcurve(pordepth[0], porfit) * Advection + pwburialflux) * conc_interp[0]
+print('Flux (mol/m^2 y^-1):', flux)
+
+figure_1, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize = (15, 8))
+grid = gridspec.GridSpec(1, 8, wspace=0.7)
+
+ax1 = plt.subplot(grid[0, :2])
+ax1.grid()
+ax2 = plt.subplot(grid[0, 2:4], sharey=ax1)
+ax2.grid()
+ax3 = plt.subplot(grid[0, 4:6], sharey=ax1)
+ax3.grid()
+ax4 = plt.subplot(grid[0, 6:8], sharey=ax1)
+ax4.grid()
+
+ax1.plot(concunique[:,1], concunique[:,0], 'go', label='Measured')
+ax1.plot(concunique[0:4,1], concunique[0:4,0], 'bo', label="Fit points")
+ax2.plot(por[:, 1], por[:, 0], 'mo', label='Measured')
+ax2.plot(porcurve(pordepth, porfit), pordepth, 'k-', label='Curve fit', linewidth=3)
+ax3.plot(sedtemp(np.arange(maxconcdepth), bottom_temp), np.arange(maxconcdepth), 'k-', linewidth=3)
+ax4.plot(picks[:,1]/1000000, picks[:,0], 'ko', label='Picks')
+ax4.plot(sedtimes/1000000, seddepths, 'b-', label='Curve fit', linewidth=2)
+ax1.legend(loc='best', fontsize='small')
+ax2.legend(loc='best', fontsize='small')
+ax4.legend(loc='best', fontsize='small')
+ax1.set_ylabel('Depth (mbsf)')
+ax1.set_xlabel('Concentration (mM)')
+ax2.set_xlabel('Porosity')
+ax3.set_xlabel('Temperature (\u00b0C)')
+ax4.set_xlabel('Age (Ma)')
+ax1.locator_params(axis='x', nbins=4)
+ax2.locator_params(axis='x', nbins=4)
+ax3.locator_params(axis='x', nbins=4)
+ax4.locator_params(axis='x', nbins=4)
+ax1.invert_yaxis()
+
+
+
 
 
 

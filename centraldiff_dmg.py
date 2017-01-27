@@ -526,7 +526,7 @@ plt.show()
 '''
 # Grid peclet and Courant numbers
 gpeclet = np.abs((advection*porosity[0]/porosity[-1]+pwburialflux[0]/porosity[-1])*intervalthickness/np.min(Dsed))[0]
-print('Grid Peclet (less than 2):', gpeclet)
+print('Grid Peclet (less than 1):', gpeclet)
 courant = np.abs((advection*porosity[0]/porosity[-1]+pwburialflux[0]/porosity[-1])*dt/intervalthickness)[0]
 print('Courant (less than 1):', courant)  
 #neumann = intervalthickness**2/(3*np.max(Dsed))
