@@ -23,6 +23,11 @@ import MySQLdb
 import os
 import datetime
 from scipy import interpolate
+from collections import defaultdict
+from scipy import optimize, integrate
+import matplotlib.gridspec as gridspec
+
+
 
 Script = os.path.basename(__file__)
 Date = datetime.datetime.now()
@@ -106,12 +111,6 @@ sql = """SELECT depth, age FROM age_depth where leg = '{}' and site = '{}' order
 picks = pd.read_sql(sql, con)
 picks = picks.as_matrix()
 picks = picks[np.argsort(picks[:,0])]
-if Bottom_boundary == 'none':
-    picks = picks
-else:
-    deepest_pick_idx = np.searchsorted(picks[:,0], Bottom_boundary)
-    picks = picks[:deepest_pick_idx, :]
-picks = picks[np.argsort(picks[:,1])]
 
 ###############################################################################
 # Average duplicates in concentration dataset, add seawater value, and make spline fit to first three values
@@ -139,10 +138,11 @@ concunique = averages(concdata[:, 0], concdata[:, 1])
 concunique = np.concatenate((np.array(([0],ct0)).T, concunique), axis=0)
 
 # Spline fit to first 4 unique concentration values
-spline_function = interpolate.splrep(concunique[:4,0], concunique[:4,1], k=3)
+spline_function = interpolate.splrep(concunique[:4,0], concunique[:4,1], k=2)
 intervalthickness = 1  # meters
 conc_interp_depths = np.arange(0,3,intervalthickness)  # Zero to 2 meters
-conc_interp = interpolate.splev(conc_interp_depths, spline_function, der=0)
+conc_interp = interpolate.splev(conc_interp_depths, spline_function)
+conc_interp_plot = interpolate.splev(np.linspace(concunique[0,0], concunique[3,0], num=50), spline_function)
 
 ###############################################################################
 # Porosity and solids fraction functions and data preparation
@@ -215,25 +215,43 @@ gradient = (-3*conc_interp[0] + 4*conc_interp[1] - conc_interp[2])/(2*intervalth
 flux = porcurve(pordepth[0], porfit) * Dsed * gradient + (porcurve(pordepth[0], porfit) * Advection + pwburialflux) * conc_interp[0]
 print('Flux (mol/m^2 y^-1):', flux)
 
-figure_1, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize = (15, 8))
-grid = gridspec.GridSpec(1, 8, wspace=0.7)
+figure_1, (ax1, ax2, ax3, ax4, ax5, ax6, ax7, ax8) = plt.subplots(1, 8, figsize = (15, 8))
+grid = gridspec.GridSpec(3, 8, wspace=0.7, hspace=0.5)
 
-ax1 = plt.subplot(grid[0, :2])
+ax1 = plt.subplot(grid[1:3, :2])
 ax1.grid()
-ax2 = plt.subplot(grid[0, 2:4], sharey=ax1)
+ax2 = plt.subplot(grid[1:3, 2:4], sharey=ax1)
 ax2.grid()
-ax3 = plt.subplot(grid[0, 4:6], sharey=ax1)
+ax3 = plt.subplot(grid[1:3, 4:6], sharey=ax1)
 ax3.grid()
-ax4 = plt.subplot(grid[0, 6:8], sharey=ax1)
+ax4 = plt.subplot(grid[1:3, 6:8], sharey=ax1)
 ax4.grid()
+ax5 = plt.subplot(grid[0, 0:2])
+ax5.grid()
+ax6 = plt.subplot(grid[0, 2:4], sharey=ax5)
+ax6.grid()
+ax7 = plt.subplot(grid[0, 4:6], sharey=ax5)
+ax7.grid()
+ax8 = plt.subplot(grid[0, 6:8], sharey=ax5)
+ax8.grid()
+
 
 ax1.plot(concunique[:,1], concunique[:,0], 'go', label='Measured')
 ax1.plot(concunique[0:4,1], concunique[0:4,0], 'bo', label="Fit points")
 ax2.plot(por[:, 1], por[:, 0], 'mo', label='Measured')
 ax2.plot(porcurve(pordepth, porfit), pordepth, 'k-', label='Curve fit', linewidth=3)
-ax3.plot(sedtemp(np.arange(maxconcdepth), bottom_temp), np.arange(maxconcdepth), 'k-', linewidth=3)
-ax4.plot(picks[:,1]/1000000, picks[:,0], 'ko', label='Picks')
-ax4.plot(sedtimes/1000000, seddepths, 'b-', label='Curve fit', linewidth=2)
+ax3.plot(sedtemp(np.arange(concunique[-1,0]), bottom_temp), np.arange(concunique[-1,0]), 'k-', linewidth=3)
+ax4.plot(picks[:,1]/1000000, picks[:,0], 'ro', label='Picks')
+ax4.plot(sedtimes/1000000, seddepths, 'k-', label='Curve fit', linewidth=2)
+ax5.plot(concunique[:7,1], concunique[:7,0], 'go', label='Measured')
+ax5.plot(concunique[:4,1], concunique[:4,0], 'bo', label='Measured')
+ax5.plot(conc_interp_plot, np.linspace(concunique[0,0], concunique[3,0], num=50), 'k-', label='Interpolated')
+ax6.plot(por[:len(por[:, 0].clip([0,concunique[6,0]])), 1], por[:, 0].clip([0,concunique[6,0]]), 'mo', label='Measured')
+ax6.plot(porcurve(pordepth, porfit), pordepth.clip([0,concunique[6,0]]), 'k-', label='Curve fit', linewidth=3)
+ax7.plot(sedtemp(np.arange(concunique[-1,0]), bottom_temp), np.arange(concunique[6,0]), 'k-', linewidth=3)
+ax8.plot(picks[:,1]/1000000, picks[:,0].clip([0,concunique[6,0]]), 'ro', label='Picks')
+ax8.plot(sedtimes/1000000, seddepths.clip([0,concunique[6,0]]), 'k-', label='Curve fit', linewidth=2)
+
 ax1.legend(loc='best', fontsize='small')
 ax2.legend(loc='best', fontsize='small')
 ax4.legend(loc='best', fontsize='small')
@@ -242,13 +260,18 @@ ax1.set_xlabel('Concentration (mM)')
 ax2.set_xlabel('Porosity')
 ax3.set_xlabel('Temperature (\u00b0C)')
 ax4.set_xlabel('Age (Ma)')
+ax5.set_ylabel('Depth (mbsf)')
 ax1.locator_params(axis='x', nbins=4)
 ax2.locator_params(axis='x', nbins=4)
 ax3.locator_params(axis='x', nbins=4)
 ax4.locator_params(axis='x', nbins=4)
+ax5.locator_params(axis='x', nbins=4)
+ax6.locator_params(axis='x', nbins=4)
+ax7.locator_params(axis='x', nbins=4)
+ax8.locator_params(axis='x', nbins=4)
 ax1.invert_yaxis()
-
-
+ax5.set_ylim([0,concunique[6,0]])
+ax5.invert_yaxis()
 
 
 
