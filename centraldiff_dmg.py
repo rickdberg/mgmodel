@@ -287,7 +287,7 @@ def porcurve(z, a):
     porbottom = por[-1, 1]
     return (portop-porbottom) * np.exp(-a*z) + porbottom
 
-porfit, porcov = optimize.curve_fit(porcurve, pordepth, porvalues)
+porfit, porcov = optimize.curve_fit(porcurve, pordepth, porvalues, p0=0.001)
 
 # Solids curve fit (based on porosity curve fit function)
 def solidcurve(z, a):
