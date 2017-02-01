@@ -6,11 +6,9 @@ Created on Thu Jan 26 16:13:57 2017
 
 Script to calculate sediment-water interface fluxes of a dissolved constituent
 
-Uses central difference formula of a spline fit to the upper sediment section
+Uses an exponential fit to the upper sediment section
 
 Must run age-depth.py for site first
-
-How to deal with tortuosity and Dsed change w depth?
 
 """
 import numpy as np
@@ -19,12 +17,12 @@ import matplotlib.pyplot as plt
 import MySQLdb
 import os
 import datetime
-from scipy import interpolate
 from collections import defaultdict
 from scipy import optimize, integrate
 import matplotlib.gridspec as gridspec
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from mpl_toolkits.axes_grid1.inset_locator import mark_inset
+from pylab import savefig
 
 Script = os.path.basename(__file__)
 Date = datetime.datetime.now()
@@ -43,8 +41,9 @@ Precision = 0.02  # measurement precision
 Ocean = 54.0  # Concentration in modern ocean (mM)
 
 # Model parameters
-dp = 12  # Number of concentration datapoints to use for exponential curve fit
-intervalthickness = 1  # Thickness of intervals between exponential curve fit datapoints for calcualting flux (meters)
+dp = 11  # Number of concentration datapoints to use for exponential curve fit
+# intervalthickness = 0.1  # Thickness of intervals between exponential curve fit datapoints for calcualting flux (meters) # Only used w Boudreau's method
+z = 0  # Depth (meters) at which to calculate flux
 
 ###############################################################################
 ###############################################################################
@@ -60,6 +59,7 @@ conctable = 'iw_all'
 portable = 'mad_all'
 isotopetable = 'mg_isotopes'
 con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
+cursor = con.cursor()
 
 # Pore water chemistry data
 sql = """SELECT sample_depth, {} FROM {} where leg = '{}' and site = '{}' and hole in {} and {} is not null and hydrate_affected is null; """.format(Solute, conctable, Leg, Site, Holes, Solute)
@@ -102,13 +102,18 @@ seddepths = np.asarray(sedratedata.iloc[:,1][0][1:-1].split(","))
 sedtimes = sedtimes.astype(np.float)
 seddepths = seddepths.astype(np.float)
 sedrates = np.diff(seddepths, axis=0)/np.diff(sedtimes, axis=0)  # m/y
-sedrate = sedrates[0]
+sedrate = sedrates[0]  # Using modern sedimentation rate
+print('Modern sed rate (cm/ky):', np.round(sedrate*100000, decimals=3))
 
 # Load age-depth data for plots  (From age_depth.py)
 sql = """SELECT depth, age FROM age_depth where leg = '{}' and site = '{}' order by 1 ;""".format(Leg, Site)
 picks = pd.read_sql(sql, con)
 picks = picks.as_matrix()
 picks = picks[np.argsort(picks[:,0])]
+
+# Age-Depth boundaries from database used in this run
+sql = """SELECT age_depth_boundaries FROM metadata_sed_rate where leg = '{}' and site = '{}' order by 1 ;""".format(Leg, Site)
+age_depth_boundaries = pd.read_sql(sql, con).iloc[0,0] # Indices when sorted by age
 
 ###############################################################################
 # Average duplicates in concentration dataset, add seawater value, and make spline fit to first three values
@@ -124,7 +129,7 @@ def averages(names, values):
     result = {}
     for name, values in value_lists.items():
         result[name] = sum(values) / float(len(values))
-    
+
     # Make it a Numpy array and pull out values
     resultkeys = np.array(list(result.keys()))
     resultvalues = np.array(list(result.values()))
@@ -133,24 +138,25 @@ def averages(names, values):
 
 # Concentration vector after averaging duplicates
 concunique = averages(concdata[:, 0], concdata[:, 1])
-concunique = np.concatenate((np.array(([0],ct0)).T, concunique), axis=0)
+concunique = np.concatenate((np.array(([0],ct0)).T, concunique), axis=0)  # Add in seawater value (upper limit)
 
-'''
-# Spline fit to first 4 unique concentration values
-spline_function = interpolate.splrep(concunique[:4,0], concunique[:4,1], k=2)
-intervalthickness = 1  # meters
-conc_interp_depths = np.arange(0,3,intervalthickness)  # Zero to 2 meters
-conc_interp = interpolate.splev(conc_interp_depths, spline_function)
-conc_interp_plot = interpolate.splev(np.linspace(concunique[0,0], concunique[3,0], num=50), spline_function)
-'''
-
-# Fit exponential curve to concentration datapoints specified as "dp"
+# Fit exponential curve to concentration datapoints (specified as "dp")
 def conc_curve(z, a):
-    return (ct0-concunique[dp-1,1]) * np.exp(-a*z) + concunique[dp-1,1]
+    return (ct0[0]-concunique[dp-1,1]) * np.exp(-a*z) + concunique[dp-1,1]
 conc_fit, conc_cov = optimize.curve_fit(conc_curve, concunique[:dp,0], concunique[:dp,1])
-conc_interp_depths = np.arange(0,3,intervalthickness)  # Three equally-spaced points 
-conc_interp_fit = conc_curve(conc_interp_depths, conc_fit)
+conc_fit = conc_fit[0]
+# conc_interp_depths = np.arange(0,3,intervalthickness)  # Three equally-spaced points 
+# conc_interp_fit = conc_curve(conc_interp_depths, conc_fit)  # To be used if Boudreau method for conc gradient is used
 conc_interp_fit_plot = conc_curve(np.linspace(concunique[0,0], concunique[dp-1,0], num=50), conc_fit)
+
+# R-squared function
+def rsq(modeled, measured):
+    yresid = measured - modeled
+    sse = sum(yresid**2)
+    sstotal = (len(measured)-1)*np.var(measured)
+    return 1-sse/sstotal
+
+r_squared = rsq(conc_curve(concunique[:dp,0], conc_fit), concunique[:dp,1])
 
 ###############################################################################
 # Porosity and solids fraction functions and data preparation
@@ -160,22 +166,23 @@ por = averages(pordata[:, 0], pordata[:, 1])  # Average duplicates
 porvalues = por[:, 1]
 pordepth = por[:, 0]
 
-# Porosity curve fit (ref?) (Makes porosity at sed surface equal to average of first 3 measurements)
+# Porosity curve fit (ref?) (Makes porosity at sed surface equal to greatest of first 3 measurements)
 def porcurve(z, a):
-    portop = np.max(por[:3, 1])  # Averages top 3 porosity measurements for upper porosity boundary
-    porbottom = por[-1, 1]  # Takes lowest porosity measurement as the lower boundary
+    portop = np.max(porvalues[:3])  # Greatest of top 3 porosity measurements for upper porosity boundary
+    porbottom = porvalues[-1]  # Takes lowest porosity measurement as the lower boundary
     return (portop-porbottom) * np.exp(-a*z) + porbottom
 
-porfit, porcov = optimize.curve_fit(porcurve, pordepth, porvalues, p0=0.001)
+porfit, porcov = optimize.curve_fit(porcurve, pordepth, porvalues, p0=0.01)
+porfit = porfit[0]
 
-#Sediment properties
-porosity = porcurve(conc_interp_depths, porfit)
+# Sediment properties at flux depth
+porosity = porcurve(z, porfit)
 tortuosity = 1-np.log(porosity**2)
 
 # Solids curve fit (based on porosity curve fit function)
 def solidcurve(z, a):
-    portop = por[0, 1]
-    porbottom = por[-1, 1]
+    portop = np.max(porvalues[:3])  # Greatest of top 3 porosity measurements for upper porosity boundary
+    porbottom = porvalues[-1]  # Takes lowest porosity measurement as the lower boundary
     return 1-((portop-porbottom) * np.exp(-a*z) + porbottom)
 
 ###############################################################################
@@ -185,7 +192,7 @@ def solidcurve(z, a):
 # Viscosity used as input into Stokes-Einstein equation
 # Td is the reference temperature (TempD), T is the in situ temperature
 def Dst(Td, T):
-    # Viscosity at reference temperature 
+    # Viscosity at reference temperature
     muwd = 4.2844324477E-05 + 1/(1.5700386464E-01*(Td+6.4992620050E+01)**2+-9.1296496657E+01)
     A = 1.5409136040E+00 + 1.9981117208E-02 * Td + -9.5203865864E-05 * Td**2
     B = 7.9739318223E+00 + -7.5614568881E-02 * Td + 4.7237011074E-04 * Td**2
@@ -200,7 +207,7 @@ def Dst(Td, T):
     Td = Td+273.15
     return T/vis*visd*Ds/Td  # Stokes-Einstein equation
 
-Dsed = Dst(TempD, bottom_temp)/tortuosity[0]  # Effective diffusion coefficient
+Dsed = Dst(TempD, bottom_temp)/tortuosity  # Effective diffusion coefficient
 
 ###############################################################################
 # Pore water burial mass flux
@@ -216,17 +223,20 @@ deepsolid = solidcurve(pordepth[-1], porfit)
 pwburialflux = deeppor*sedmassrate/deepsolid
 
 ###############################################################################
-# Flux model # Needs work
+# Flux model
 
-gradient = (-3*conc_interp_fit[0] + 4*conc_interp_fit[1] - conc_interp_fit[2])/(2*intervalthickness)
-flux = porcurve(pordepth[0], porfit) * Dsed * gradient + (porcurve(pordepth[0], porfit) * advection + pwburialflux) * conc_interp_fit[0]
+#  gradient = (-3*conc_interp_fit[0] + 4*conc_interp_fit[1] - conc_interp_fit[2])/(2*intervalthickness)  # Approximation according to Boudreau 1997 Diagenetic Models and Their Implementation. Matches well with derivative method
+a = conc_fit
+gradient = (ct0[0] - concunique[dp - 1, 1]) * -a * np.exp(-a * z)  # Derivative of conc_curve @ z
+
+flux = porosity * Dsed * gradient + (porosity * advection + pwburialflux) * conc_curve(z, conc_fit)
 print('Flux (mol/m^2 y^-1):', flux)
 
 ###############################################################################
 # Plotting
-    
+
 # Set up axes and subplot grid
-figure_1, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize = (15, 7))
+figure_1, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(15, 7))
 grid = gridspec.GridSpec(3, 8, wspace=0.7)
 ax1 = plt.subplot(grid[0:3, :2])
 ax1.grid()
@@ -238,11 +248,11 @@ ax4 = plt.subplot(grid[0:3, 6:8], sharey=ax1)
 ax4.grid()
 
 # Figure title
-figure_1.suptitle(r"$Expedition\ {},\ Site\ {}\ \ \ \ \ \ \ \ \ \ \ \ \ \ {}\ flux={}\ mol/m^2y$".format(Leg, Site, Solute, round(flux[0],4)), fontsize=20)
+figure_1.suptitle(r"$Expedition\ {},\ Site\ {}\ \ \ \ \ \ \ \ \ \ \ \ \ \ {}\ flux={}\ mol/m^2y$".format(Leg, Site, Solute, round(flux,4)), fontsize=20)
 
 # Plot input data
-ax1.plot(concunique[:,1], concunique[:,0], 'go', label='Measured')
-ax1.plot(concunique[0:dp,1], concunique[0:dp,0], 'bo', label="Fit points")
+ax1.plot(concunique[:,1], concunique[:,0], 'go')
+ax1.plot(concunique[0:dp,1], concunique[0:dp,0], 'bo', label="Used for curve fit")
 ax2.plot(por[:, 1], por[:, 0], 'mo', label='Measured')
 ax2.plot(porcurve(pordepth, porfit), pordepth, 'k-', label='Curve fit', linewidth=3)
 ax3.plot(sedtemp(np.arange(concunique[-1,0]), bottom_temp), np.arange(concunique[-1,0]), 'k-', linewidth=3)
@@ -250,15 +260,15 @@ ax4.plot(picks[:,1]/1000000, picks[:,0], 'ro', label='Picks')
 ax4.plot(sedtimes/1000000, seddepths, 'k-', label='Curve fit', linewidth=2)
 
 # Inset in concentration plot
-y2= np.ceil(concunique[dp+2,0])
-x2= max(concunique[:dp+3,1])
-x1= np.ceil(concunique[dp+2,1])
-axins1 = inset_axes(ax1, width="50%", height="30%", loc=5) # zoom = 2x
+y2 = np.ceil(concunique[dp+2,0])
+x2 = max(concunique[:dp+3,1])
+x1 = np.ceil(concunique[dp+2,1])
+axins1 = inset_axes(ax1, width="50%", height="30%", loc=5)
 axins1.plot(concunique[:,1], concunique[:,0], 'go')
 axins1.plot(concunique[0:dp,1], concunique[0:dp,0], 'bo')
 axins1.plot(conc_interp_fit_plot, np.linspace(concunique[0,0], concunique[dp-1,0], num=50), 'k-')
-axins1.set_xlim(x1-1, x2+1) # apply the x-limits
-axins1.set_ylim(0, y2) # apply the y-limits
+axins1.set_xlim(x1-1, x2+1)
+axins1.set_ylim(0, y2)
 mark_inset(ax1, axins1, loc1=1, loc2=2, fc="none", ec="0.5")
 
 # Additional formatting
@@ -274,7 +284,29 @@ ax1.locator_params(axis='x', nbins=4)
 ax2.locator_params(axis='x', nbins=4)
 ax3.locator_params(axis='x', nbins=4)
 ax4.locator_params(axis='x', nbins=4)
+axins1.locator_params(axis='x', nbins=3)
 ax1.invert_yaxis()
 axins1.invert_yaxis()
+
+# Save Figure
+savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output flux figures\interface_flux_{}_{}.png".format(Leg, Site))
+
+###############################################################################
+# Send metadata to database
+
+cursor.execute("""select site_key from site_info where leg = '{}' and site = '{}' ;""".format(Leg, Site))
+site_key = cursor.fetchone()[0]
+cursor.execute("""insert into metadata_{}_flux (site_key, leg, site, hole, solute, 
+interface_flux, flux_depth, datapoints, r_squared, age_depth_boundaries, sed_rate, 
+advection, measurement_precision, ds, ds_reference_temp, bottom_temp, script, run_date) 
+VALUES ({}, '{}', '{}', '{}', '{}', {}, {}, {}, {}, '{}', {}, {}, {}, {}, {}, {}, '{}', '{}')  
+ON DUPLICATE KEY UPDATE hole='{}', solute='{}', interface_flux={}, flux_depth={}, 
+datapoints={}, r_squared={}, age_depth_boundaries='{}', sed_rate={}, advection={}, 
+measurement_precision={}, ds={}, ds_reference_temp={}, bottom_temp={}, script='{}', run_date='{}' 
+;""".format(Solute, site_key, Leg, Site, Hole, Solute, flux, z, dp, r_squared, 
+age_depth_boundaries, sedrate, advection, Precision, Ds, TempD, bottom_temp, Script, Date, 
+Hole, Solute, flux, z, dp, r_squared, age_depth_boundaries, sedrate, advection, 
+Precision, Ds, TempD, bottom_temp, Script, Date))
+con.commit()
 
 # eof
