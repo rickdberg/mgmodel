@@ -45,7 +45,7 @@ integratedrates_avg = []
 integratedrates_modern = []
 
 # Smooth concentrations using 5-point gaussian using reflect at edges
-conc = np.sum((concunique[:,1], np.multiply(offsets, concunique[:,1])))
+conc = np.add((concunique[:,1], np.multiply(offsets, concunique[:,1])))
 concsmooth = ndimage.filters.gaussian_filter1d(conc, 1, axis=1, mode='reflect')
 
 # Interpolate smoothed profile

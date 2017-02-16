@@ -42,8 +42,8 @@ Ocean = 54.0  # Concentration in modern ocean (mM)
 
 # Model parameters
 dp = 11  # Number of concentration datapoints to use for exponential curve fit
-# intervalthickness = 0.1  # Thickness of intervals between exponential curve fit datapoints for calcualting flux (meters) # Only used w Boudreau's method
 z = 0  # Depth (meters) at which to calculate flux
+# intervalthickness = 0.1  # Thickness of intervals between exponential curve fit datapoints for calcualting flux (meters) # Only used w Boudreau's method
 
 ###############################################################################
 ###############################################################################
@@ -142,7 +142,7 @@ concunique = np.concatenate((np.array(([0],ct0)).T, concunique), axis=0)  # Add 
 
 # Fit exponential curve to concentration datapoints (specified as "dp")
 def conc_curve(z, a):
-    return (ct0[0]-concunique[dp-1,1]) * np.exp(-a*z) + concunique[dp-1,1]
+    return (ct0[0]-concunique[dp-1,1]) * np.exp(np.multiply(np.multiply(-1, a), z)) + concunique[dp-1,1]
 conc_fit, conc_cov = optimize.curve_fit(conc_curve, concunique[:dp,0], concunique[:dp,1])
 conc_fit = conc_fit[0]
 # conc_interp_depths = np.arange(0,3,intervalthickness)  # Three equally-spaced points 
@@ -166,11 +166,11 @@ por = averages(pordata[:, 0], pordata[:, 1])  # Average duplicates
 porvalues = por[:, 1]
 pordepth = por[:, 0]
 
-# Porosity curve fit (ref?) (Makes porosity at sed surface equal to greatest of first 3 measurements)
+# Porosity curve fit (Modified Athy's Law, ) (Makes porosity at sed surface equal to greatest of first 3 measurements)
 def porcurve(z, a):
     portop = np.max(porvalues[:3])  # Greatest of top 3 porosity measurements for upper porosity boundary
     porbottom = porvalues[-1]  # Takes lowest porosity measurement as the lower boundary
-    return (portop-porbottom) * np.exp(-a*z) + porbottom
+    return (portop-porbottom) * np.exp(np.multiply(np.multiply(-1, a), z)) + porbottom
 
 porfit, porcov = optimize.curve_fit(porcurve, pordepth, porvalues, p0=0.01)
 porfit = porfit[0]
@@ -183,7 +183,7 @@ tortuosity = 1-np.log(porosity**2)
 def solidcurve(z, a):
     portop = np.max(porvalues[:3])  # Greatest of top 3 porosity measurements for upper porosity boundary
     porbottom = porvalues[-1]  # Takes lowest porosity measurement as the lower boundary
-    return 1-((portop-porbottom) * np.exp(-a*z) + porbottom)
+    return 1-((portop-porbottom) * np.exp(np.multiply(np.multiply(-1, a), z)) + porbottom)
 
 ###############################################################################
 # Diffusion coefficient function
@@ -191,7 +191,7 @@ def solidcurve(z, a):
 # Calculates viscosity from Mostafa H. Sharqawy 12-18-2009, MIT (mhamed@mit.edu) Sharqawy M. H., Lienhard J. H., and Zubair, S. M., Desalination and Water Treatment, 2009
 # Viscosity used as input into Stokes-Einstein equation
 # Td is the reference temperature (TempD), T is the in situ temperature
-def Dst(Td, T):
+def Dstp(Td, T):
     # Viscosity at reference temperature
     muwd = 4.2844324477E-05 + 1/(1.5700386464E-01*(Td+6.4992620050E+01)**2+-9.1296496657E+01)
     A = 1.5409136040E+00 + 1.9981117208E-02 * Td + -9.5203865864E-05 * Td**2
@@ -207,7 +207,8 @@ def Dst(Td, T):
     Td = Td+273.15
     return T/vis*visd*Ds/Td  # Stokes-Einstein equation
 
-Dsed = Dst(TempD, bottom_temp)/tortuosity  # Effective diffusion coefficient
+D_in_situ = Dstp(TempD, bottom_temp)
+Dsed = D_in_situ/tortuosity  # Effective diffusion coefficient
 
 ###############################################################################
 # Pore water burial mass flux
@@ -287,6 +288,7 @@ ax4.locator_params(axis='x', nbins=4)
 axins1.locator_params(axis='x', nbins=3)
 ax1.invert_yaxis()
 axins1.invert_yaxis()
+plt.show()
 
 # Save Figure
 savefig(r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\Output flux figures\interface_flux_{}_{}.png".format(Leg, Site))
