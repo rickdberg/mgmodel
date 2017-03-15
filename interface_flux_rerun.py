@@ -51,7 +51,7 @@ engine = sa.create_engine("mysql://root:neogene227@localhost/iodp_compiled")
 sql = "SELECT * FROM metadata_mg_flux WHERE complete = 'yes';"
 metadata = pd.read_sql(sql, con=engine)
 
-for i in np.arange(np.size(metadata, axis=0))+21:
+for i in np.arange(np.size(metadata, axis=0)):
     Comments = metadata.comments[i]
     Leg = metadata.leg[i]
     Site = metadata.site[i]
@@ -76,13 +76,29 @@ for i in np.arange(np.size(metadata, axis=0))+21:
     concdata = concdata.as_matrix()
 
     # Bottom water concentration
-    sql = """SELECT sample_depth, Cl, Cl_ic FROM {} where leg = '{}' and site = '{}' and hole in {} and hydrate_affected is null; """.format(conctable, Leg, Site, Holes)
+    sql = """SELECT sample_depth, Cl
+    FROM {}
+    where leg = '{}' and site = '{}' and hole in {}
+    and Cl is not null
+    and sample_depth > 0.05 and sample_depth < 10
+    ; """.format(conctable, Leg, Site, Holes)
     cl_data = pd.read_sql(sql, con)
     cl_data = cl_data.fillna(np.nan).sort_values(by='sample_depth')
-    if cl_data.iloc[:3,1].isnull().all():
-        cl_bottom_water = stats.nanmean(cl_data.iloc[:3,2])
+    if cl_data.iloc[:,1].isnull().all():
+        sql = """SELECT sample_depth, Cl_ic
+        FROM {}
+        where leg = '{}' and site = '{}' and hole in {}
+        and Cl is not null
+        and sample_depth > 0.05 and sample_depth < 10
+        ; """.format(conctable, Leg, Site, Holes)
+        cl_ic_data = pd.read_sql(sql, con)
+        cl_ic_data = cl_ic_data.fillna(np.nan).sort_values(by='sample_depth')
+        if cl_ic_data.iloc[:,1].isnull().all():
+            cl_bottom_water = 558
+        else:
+            cl_bottom_water = stats.nanmean(cl_ic_data.iloc[0,2])
     else:
-        cl_bottom_water = stats.nanmean(cl_data.iloc[:3,1])
+        cl_bottom_water = stats.nanmean(cl_data.iloc[0,1])
     bottom_conc = Ocean/558*cl_bottom_water  # Solute normalized to Cl in top three iw measurements from site
     ct0 = [bottom_conc]  # mol per m^3 in modern seawater at specific site
 
@@ -188,7 +204,7 @@ for i in np.arange(np.size(metadata, axis=0))+21:
     # Porosity curve fit (Modified Athy's Law, ) (Makes porosity at sed surface equal to greatest of first 3 measurements)
     def porcurve(z, a):
         portop = np.max(porvalues[:3])  # Greatest of top 3 porosity measurements for upper porosity boundary
-        porbottom = porvalues[-1]  # Takes lowest porosity measurement as the lower boundary
+        porbottom = np.mean(porvalues[-3:])  # Takes lowest porosity measurement as the lower boundary
         return (portop-porbottom) * np.exp(np.multiply(np.multiply(-1, a), z)) + porbottom
 
     porfit, porcov = optimize.curve_fit(porcurve, pordepth, porvalues, p0=0.01)
@@ -229,7 +245,7 @@ for i in np.arange(np.size(metadata, axis=0))+21:
     # Solids curve fit (based on porosity curve fit function)
     def solidcurve(z, a):
         portop = np.max(porvalues[:3])  # Greatest of top 3 porosity measurements for upper porosity boundary
-        porbottom = porvalues[-1]  # Takes lowest porosity measurement as the lower boundary
+        porbottom = np.mean(porvalues[-3:])  # Takes lowest porosity measurement as the lower boundary
         return 1-((portop-porbottom) * np.exp(np.multiply(np.multiply(-1, a), z)) + porbottom)
 
     # Sediment mass (1-dimensional volume of solids) accumulation rates for each age-depth section
@@ -317,15 +333,15 @@ for i in np.arange(np.size(metadata, axis=0))+21:
     cursor.execute("""select site_key from site_info where leg = '{}' and site = '{}' ;""".format(Leg, Site))
     site_key = cursor.fetchone()[0]
     cursor.execute("""insert into metadata_{}_flux (site_key, leg, site, hole, solute,
-    interface_flux, burial_flux, flux_depth, datapoints, bottom_conc, r_squared, age_depth_boundaries, sed_rate,
+    interface_flux, burial_flux, gradient, top_por, flux_depth, datapoints, bottom_conc, r_squared, age_depth_boundaries, sed_rate,
     advection, measurement_precision, ds, ds_reference_temp, bottom_temp, script, run_date, comments, complete)
-    VALUES ({}, '{}', '{}', '{}', '{}', {}, {}, {}, {}, {}, {}, '{}', {}, {}, {}, {}, {}, {}, '{}', '{}', '{}', '{}')
-    ON DUPLICATE KEY UPDATE hole='{}', solute='{}', interface_flux={}, burial_flux={}, flux_depth={},
+    VALUES ({}, '{}', '{}', '{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, '{}', {}, {}, {}, {}, {}, {}, '{}', '{}', '{}', '{}')
+    ON DUPLICATE KEY UPDATE hole='{}', solute='{}', interface_flux={}, burial_flux={}, gradient={}, top_por={}, flux_depth={},
     datapoints={}, bottom_conc={}, r_squared={}, age_depth_boundaries='{}', sed_rate={}, advection={},
     measurement_precision={}, ds={}, ds_reference_temp={}, bottom_temp={}, script='{}', run_date='{}', comments='{}', complete='{}'
-    ;""".format(Solute_db, site_key, Leg, Site, Hole, Solute, flux, burial_flux, z, dp, bottom_conc, r_squared,
+    ;""".format(Solute_db, site_key, Leg, Site, Hole, Solute, flux, burial_flux, gradient, porosity, z, dp, bottom_conc, r_squared,
     age_depth_boundaries, sedrate, advection, Precision, Ds, TempD, bottom_temp, Script, Date, Comments, Complete,
-    Hole, Solute, flux, burial_flux, z, dp, bottom_conc, r_squared, age_depth_boundaries, sedrate, advection,
+    Hole, Solute, flux, burial_flux, gradient, porosity, z, dp, bottom_conc, r_squared, age_depth_boundaries, sedrate, advection,
     Precision, Ds, TempD, bottom_temp, Script, Date, Comments, Complete))
     con.commit()
 

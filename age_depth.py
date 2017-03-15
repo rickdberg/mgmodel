@@ -24,12 +24,12 @@ Script = os.path.basename(__file__)
 Date = datetime.datetime.now()
 
 # Site ID
-Leg = '190'
-Site = '1173'
-Holes = "('A')"
+Leg = '105'
+Site = '646'
+Holes = "('A','B')"
 Bottom_boundary = 'none' # 'none', or an integer depth
 # age_depth_boundaries = [0, 4, 7] # Index when sorted by age
-age_depth_boundaries = [0, 10, 25, 39, 44] # Index when sorted by depth
+age_depth_boundaries = [0, 22, 25] # Index when sorted by depth
 
 
 ###############################################################################
@@ -47,7 +47,7 @@ cur = con.cursor()
 
 # Sedimentation rate profile (m/y)
 # Note: Input data must have time at depth=0
-sql = """SELECT depth, age FROM age_depth where leg = '{}' and site = '{}' order by 1 ;""".format(Leg, Site)
+sql = """SELECT depth, age FROM age_depth where leg = '{}' and site = '{}' and hole in {} order by 1 ;""".format(Leg, Site, Holes)
 sed = pd.read_sql(sql, con)
 sed = sed.as_matrix()
 if min(sed[:,0]) > 0:

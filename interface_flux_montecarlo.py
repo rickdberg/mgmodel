@@ -67,12 +67,12 @@ def conc_curve_mc(z, a):
 
 def por_curve_mc(z, a):
     portop = np.max(por_rand[n,:3])  # Greatest of top 3 porosity measurements for upper porosity boundary
-    porbottom = por_rand[n,-1]  # Takes lowest porosity measurement as the lower boundary
+    porbottom = np.mean(por_rand[n,-3:])  # Takes lowest porosity measurement as the lower boundary
     return (portop-porbottom) * np.exp(np.multiply(np.multiply(-1, a), z)) + porbottom
 
 def solid_curve_mc(z, a):
     portop = np.max(por_rand[n,:3])  # Greatest of top 3 porosity measurements for upper porosity boundary
-    porbottom = por_rand[n,-1]  # Takes lowest porosity measurement as the lower boundary
+    porbottom = np.mean(por_rand[n,-3:])  # Takes lowest porosity measurement as the lower boundary
     return np.subtract(1, ((portop-porbottom) * np.exp(np.multiply(np.multiply(-1, a), z)) + porbottom))
 
 # Calculate flux
@@ -97,8 +97,8 @@ for n in range(cycles):
 
 # Pore water burial flux
 sedmassrate = sectionmasses/np.diff(sedtimes)[0]
-deeppor = por_rand[:,-1]
-deepsolid = 1 - por_rand[:,-1]
+deeppor = np.mean(por_rand[:,-3:])
+deepsolid = 1 - deeppor
 pwburialflux = deeppor*sedmassrate/deepsolid
 
 
