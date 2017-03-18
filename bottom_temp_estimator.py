@@ -57,7 +57,11 @@ plt.scatter(shallow_data['bottom_water_temp'], shallow_data['water_depth'], s=ab
 y = np.linspace(0, 1500)
 plt.plot(slope*y+intercept, y, 'k-')
 
-shallow_rmse = pd.Series.std((slope*shallow_data['water_depth']+intercept) - shallow_data['bottom_water_temp'])
+# Error calculated as relative root mean squared error of curve fit to reported values
+def rmse(model_values, measured_values):
+    return np.sqrt(((model_values-measured_values)**2).mean())
+shallow_rmse = rmse((slope*shallow_data['water_depth']+intercept), shallow_data['bottom_water_temp'])
+# shallow_rmse = pd.Series.std((slope*shallow_data['water_depth']+intercept) - shallow_data['bottom_water_temp'])
 
 # Plot all data
 plt.scatter(data['bottom_water_temp'], data['water_depth'], s=abs(data['lat']), c=data['bottom_water_temp'])

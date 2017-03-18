@@ -12,7 +12,7 @@ import MySQLdb
 import matplotlib.pyplot as plt
 from pylab import savefig
 from matplotlib import mlab
-from interface_flux import Precision, concunique, dp, pordepth, porfit, porvalues, seddepths, sedtimes, TempD, bottom_temp, z, advection, Leg, Site, Solute_db, porcurve, Dstp
+from interface_flux import Precision, concunique, dp, pordepth, porfit, porvalues, seddepths, sedtimes, TempD, bottom_temp, bottom_temp_est, z, advection, Leg, Site, Solute_db, porcurve, Dstp
 
 cycles = 5000  # Monte Carlo simulations
 
@@ -27,6 +27,15 @@ def rmse(model_values, measured_values):
 # Porosity offsets - using full gaussian probability
 por_error = rmse(porcurve(pordepth, porfit), porvalues)
 por_offsets = np.random.normal(scale=por_error, size=(cycles, len(porvalues)))
+
+# Bottom water temperature offsets
+if bottom_temp_est == 'deep':
+    temp_error = 0.9
+elif bottom_temp_est == 'shallow':
+    temp_error = 4.2
+else:
+    temp_error = 0
+temp_offsets = np.random.normal(scale=temp_error, size=cycles)
 
 '''
 # Concentration offsets - truncate error at 1-sigma of gaussian distribution
@@ -60,6 +69,9 @@ portop_rand = np.add(portop, por_offsets[:,0])
 portop_rand[portop_rand > 0.90] = 0.90
 for n in range(cycles):
     portop_rand[portop_rand < por_rand[n,-1]] = por_rand[n,-1]
+
+# Randomized bottom_water_temp
+
 
 # Define curve fit functions for Monte Carlo Method
 def conc_curve_mc(z, a):
@@ -101,9 +113,12 @@ deeppor = np.mean(por_rand[:,-3:])
 deepsolid = 1 - deeppor
 pwburialflux = deeppor*sedmassrate/deepsolid
 
-
+# Dsed vector
 tortuosity_rand = 1-np.log(portop_rand**2)
-Dsed_rand = Dstp(TempD, bottom_temp)/tortuosity_rand
+bottom_temp_rand = bottom_temp+temp_offsets
+bottom_temp_rand[bottom_temp_rand < -2] = -2
+
+Dsed_rand = Dstp(TempD, bottom_temp_rand)/tortuosity_rand
 
 
 # Plot all the monte carlo runs
