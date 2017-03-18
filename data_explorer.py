@@ -25,6 +25,8 @@ sitedata = pd.read_sql(sql, engine)
 # Load hole data
 sql = "SELECT * FROM summary_all;"
 holedata = pd.read_sql(sql, engine)
+holedata = holedata[holedata['leg'] != '161']
+holedata = holedata[holedata['leg'] != '160']
 
 # Group and average hole data for sites
 hole_grouped = holedata.loc[:,('site_key', 'lat','lon','water_depth','total_penetration')].groupby("site_key").mean().reset_index()
@@ -34,11 +36,18 @@ site_meta_data = pd.merge(metadata, sitedata, how='outer', on=('site_key', 'leg'
 data = pd.merge(site_meta_data, hole_grouped, how='outer', on=('site_key')).fillna(np.nan)
 
 # Play w data
-plt.scatter(data['lon'], data['lat'], c=data['interface_flux'], s=data['water_depth'].astype(float)/10)
+plt.scatter(data['lon'], data['lat'], c=data['bottom_temp'], s=data['water_depth'].astype(float)/10)
 plt.xlim((-180,180))
-plt.ylim((0,90))
+plt.ylim((-90,90))
 
-plt.plot(data['interface_flux'], data['gradient'], 'o')
-plt.xlim((0,0.05))
+plt.scatter(data['bottom_water_temp'], data['water_depth'], s=abs(data['lat']))
+# plt.xlim((0,0.05))
+plt.show()
+
+plt.scatter(data['bottom_water_temp'], data['water_depth']*abs(data['lat']), s=abs(data['lat']))
+# plt.xlim((0,0.05))
+plt.show()
+
+
 
 # eof

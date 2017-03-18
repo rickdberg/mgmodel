@@ -26,11 +26,12 @@ Script = os.path.basename(__file__)
 Date = datetime.datetime.now()
 
 # Site Information
-Leg = '69'
-Site = '504'
-Holes = "('A','B','C')"
+Leg = '39'
+Site = '353'
+Holes = "('','A','B')"
 Hole = ''.join(filter(str.isalpha, Holes))  # Formatting for saving in metadata
 Comments = ''
+Complete = ''
 
 # Species parameters
 Solute = 'Mg'  # Change to Mg_ic if needed, based on what's available in database
@@ -41,7 +42,7 @@ Ocean = 54  # Concentration in modern ocean (mM)
 Solute_db = 'Mg' # Label for the database loading
 
 # Model parameters
-dp = 3  # Number of concentration datapoints to use for exponential curve fit
+dp = 17  # Number of concentration datapoints to use for exponential curve fit
 z = 0  # Depth (meters) at which to calculate flux
 
 ###############################################################################
@@ -58,7 +59,6 @@ conctable = 'iw_all'
 portable = 'mad_all'
 con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
 cursor = con.cursor()
-Complete = 'no'
 
 # Pore water chemistry data
 sql = """SELECT sample_depth, {} FROM {} where leg = '{}' and site = '{}' and hole in {} and {} is not null and hydrate_affected is null; """.format(Solute, conctable, Leg, Site, Holes, Solute)
@@ -99,7 +99,7 @@ pordata = pd.read_sql(sql, con)
 if pordata.iloc[:,1].count() < 40:
     sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
     pordata_b = pd.read_sql(sql, con)
-pordata = pd.concat((pordata, pordata_b), axis=0)
+    pordata = pd.concat((pordata, pordata_b), axis=0)
 pordata = pordata.as_matrix()
 
 # Temperature gradient (degrees C/m)
@@ -107,14 +107,30 @@ sql = """SELECT temp_gradient FROM site_info where leg = '{}' and site = '{}';""
 temp_gradient = pd.read_sql(sql, con)
 temp_gradient = temp_gradient.iloc[0,0]
 
+# Water depth for bottom water estimation
+sql = "SELECT avg(water_depth) FROM summary_all WHERE leg = '{}' and site = '{}';""".format(Leg, Site)
+water_depth = pd.read_sql(sql, con)
+water_depth = water_depth.iloc[0,0]
+
 # Bottom water temp (degrees C)
 sql = """SELECT bottom_water_temp FROM site_info where leg = '{}' and site = '{}';""".format(Leg, Site)
 bottom_temp = pd.read_sql(sql, con)
-bottom_temp = bottom_temp.iloc[0,0]
+if bottom_temp.iloc[0,0] == None:
+    if water_depth >= 1500:
+        bottom_temp = 1.9
+        bottom_temp_est = 'deep'
+    else:
+        bottom_temp = -0.01168*water_depth+16.629  # Empirical equation from available bottom_water_temp-depth data
+        bottom_temp_est = 'shallow'
+else:
+    bottom_temp = bottom_temp.iloc[0,0]
 
 # Temperature profile (degrees C)
 def sedtemp(z, bottom_temp):
-    return bottom_temp + np.multiply(z, temp_gradient)
+    if z == 0:
+        return bottom_temp
+    else:
+        return bottom_temp + np.multiply(z, temp_gradient)
 
 # Advection rate (m/y)
 sql = """SELECT advection_rate FROM site_info where leg = '{}' and site = '{}';""".format(Leg, Site)
@@ -292,7 +308,7 @@ ax4.plot(picks[:,1]/1000000, picks[:,0], 'ro', label='Picks')
 ax4.plot(sedtimes/1000000, seddepths, 'k-', label='Curve fit', linewidth=2)
 
 # Inset in concentration plot
-y2 = np.ceil(concunique[dp+1,0])
+y2 = np.ceil(concunique[dp-1,0])
 x2 = max(concunique[:dp,1])+2
 x1 = min(concunique[:dp,1])-2
 axins1 = inset_axes(ax1, width="50%", height="30%", loc=5)
@@ -331,15 +347,15 @@ cursor.execute("""select site_key from site_info where leg = '{}' and site = '{}
 site_key = cursor.fetchone()[0]
 cursor.execute("""insert into metadata_{}_flux (site_key, leg, site, hole, solute,
 interface_flux, burial_flux, gradient, top_por, flux_depth, datapoints, bottom_conc, r_squared, age_depth_boundaries, sed_rate,
-advection, measurement_precision, ds, ds_reference_temp, bottom_temp, script, run_date, comments, complete)
-VALUES ({}, '{}', '{}', '{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, '{}', {}, {}, {}, {}, {}, {}, '{}', '{}', '{}', '{}')
+advection, measurement_precision, ds, ds_reference_temp, bottom_temp, bottom_temp_est, script, run_date, comments, complete)
+VALUES ({}, '{}', '{}', '{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, '{}', {}, {}, {}, {}, {}, {}, '{}', '{}', '{}', '{}', '{}')
 ON DUPLICATE KEY UPDATE hole='{}', solute='{}', interface_flux={}, burial_flux={}, gradient={}, top_por={}, flux_depth={},
 datapoints={}, bottom_conc={}, r_squared={}, age_depth_boundaries='{}', sed_rate={}, advection={},
-measurement_precision={}, ds={}, ds_reference_temp={}, bottom_temp={}, script='{}', run_date='{}', comments='{}', complete='{}'
+measurement_precision={}, ds={}, ds_reference_temp={}, bottom_temp={}, bottom_temp_est='{}', script='{}', run_date='{}', comments='{}', complete='{}'
 ;""".format(Solute_db, site_key, Leg, Site, Hole, Solute, flux, burial_flux, gradient, porosity, z, dp, bottom_conc, r_squared,
-age_depth_boundaries, sedrate, advection, Precision, Ds, TempD, bottom_temp, Script, Date, Comments, Complete,
+age_depth_boundaries, sedrate, advection, Precision, Ds, TempD, bottom_temp, bottom_temp_est, Script, Date, Comments, Complete,
 Hole, Solute, flux, burial_flux, gradient, porosity, z, dp, bottom_conc, r_squared, age_depth_boundaries, sedrate, advection,
-Precision, Ds, TempD, bottom_temp, Script, Date, Comments, Complete))
+Precision, Ds, TempD, bottom_temp, bottom_temp_est, Script, Date, Comments, Complete))
 con.commit()
 
 # eof
