@@ -26,9 +26,9 @@ Script = os.path.basename(__file__)
 Date = datetime.datetime.now()
 
 # Site Information
-Leg = '39'
-Site = '353'
-Holes = "('','A','B')"
+Leg = '69'
+Site = '504'
+Holes = "('','A','B','C')"
 Hole = ''.join(filter(str.isalpha, Holes))  # Formatting for saving in metadata
 Comments = ''
 Complete = ''
@@ -42,7 +42,7 @@ Ocean = 54  # Concentration in modern ocean (mM)
 Solute_db = 'Mg' # Label for the database loading
 
 # Model parameters
-dp = 17  # Number of concentration datapoints to use for exponential curve fit
+dp = 3  # Number of concentration datapoints to use for exponential curve fit
 z = 0  # Depth (meters) at which to calculate flux
 
 ###############################################################################
@@ -127,8 +127,8 @@ else:
 
 # Temperature profile (degrees C)
 def sedtemp(z, bottom_temp):
-    if z == 0:
-        return bottom_temp
+    if z.all() == 0:
+        return bottom_temp*np.ones(len(z))
     else:
         return bottom_temp + np.multiply(z, temp_gradient)
 
