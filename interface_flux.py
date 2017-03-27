@@ -26,15 +26,15 @@ Script = os.path.basename(__file__)
 Date = datetime.datetime.now()
 
 # Site Information
-Leg = '69'
-Site = '504'
-Holes = "('','A','B','C')"
-Hole = ''.join(filter(str.isalpha, Holes))  # Formatting for saving in metadata
+Leg = '339'
+Site = 'U1390'
+Holes = "('A') or hole is null"
+Hole = ''.join(filter(str.isupper, filter(str.isalpha, Holes)))  # Formatting for saving in metadata
 Comments = ''
 Complete = ''
 
 # Species parameters
-Solute = 'Mg'  # Change to Mg_ic if needed, based on what's available in database
+Solute = 'Mg_ic'  # Change to Mg_ic if needed, based on what's available in database
 Ds = 1.875*10**-2  # m^2 per year free diffusion coefficient at 18C (ref?)
 TempD = 18  # Temperature at which diffusion coefficient is known
 Precision = 0.02  # measurement precision
@@ -42,7 +42,7 @@ Ocean = 54  # Concentration in modern ocean (mM)
 Solute_db = 'Mg' # Label for the database loading
 
 # Model parameters
-dp = 3  # Number of concentration datapoints to use for exponential curve fit
+dp = 6 # Number of concentration datapoints to use for exponential curve fit
 z = 0  # Depth (meters) at which to calculate flux
 
 ###############################################################################
@@ -61,7 +61,10 @@ con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
 cursor = con.cursor()
 
 # Pore water chemistry data
-sql = """SELECT sample_depth, {} FROM {} where leg = '{}' and site = '{}' and hole in {} and {} is not null and hydrate_affected is null; """.format(Solute, conctable, Leg, Site, Holes, Solute)
+sql = """SELECT sample_depth, {}
+FROM {}
+where leg = '{}' and site = '{}' and (hole in {})
+and {} is not null and hydrate_affected is null; """.format(Solute, conctable, Leg, Site, Holes, Solute)
 concdata = pd.read_sql(sql, con)
 concdata = concdata.sort_values(by='sample_depth')
 concdata = concdata.as_matrix()
@@ -69,7 +72,7 @@ concdata = concdata.as_matrix()
 # Bottom water concentration Cl. Take first available of titration value <10 mbsf, then IC, then IAPSO.
 sql = """SELECT sample_depth, Cl
 FROM {}
-where leg = '{}' and site = '{}' and hole in {}
+where leg = '{}' and site = '{}' and (hole in {})
 and Cl is not null
 and sample_depth > 0.05 and sample_depth < 10
 ; """.format(conctable, Leg, Site, Holes)
@@ -78,7 +81,7 @@ cl_data = cl_data.fillna(np.nan).sort_values(by='sample_depth')
 if cl_data.iloc[:,1].isnull().all():
     sql = """SELECT sample_depth, Cl_ic
     FROM {}
-    where leg = '{}' and site = '{}' and hole in {}
+    where leg = '{}' and site = '{}' and (hole in {})
     and Cl is not null
     and sample_depth > 0.05 and sample_depth < 10
     ; """.format(conctable, Leg, Site, Holes)
@@ -94,16 +97,25 @@ bottom_conc = Ocean/558*cl_bottom_water  # Solute normalized to Cl in top three 
 ct0 = [bottom_conc]  # mol per m^3 in modern seawater at specific site
 
 # Porosity data
-sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and coalesce(method,'C') like '%C%'  and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
+sql = """SELECT sample_depth, porosity
+FROM {}
+where leg = '{}' and site = '{}' and (hole in {})
+and coalesce(method,'C') like '%C%'
+and {} is not null and {} > 0 and {} < 1 AND sample_depth is not null;""".format(portable, Leg, Site, Holes, 'porosity', 'porosity', 'porosity')
 pordata = pd.read_sql(sql, con)
-if pordata.iloc[:,1].count() < 40:
-    sql = """SELECT sample_depth, porosity FROM {} where leg = '{}' and site = '{}' and hole in {} and {} is not null ;""".format(portable, Leg, Site, Holes, 'porosity')
+if pordata.iloc[:,1].count() < 40:  # If not enough data from method C, take all data
+    sql = """SELECT sample_depth, porosity
+    FROM {}
+    where leg = '{}' and site = '{}' and (hole in {})
+    and {} is not null and {} > 0 AND {} < 1 and sample_depth is not null;""".format(portable, Leg, Site, Holes, 'porosity', 'porosity', 'porosity')
     pordata_b = pd.read_sql(sql, con)
     pordata = pd.concat((pordata, pordata_b), axis=0)
 pordata = pordata.as_matrix()
 
 # Temperature gradient (degrees C/m)
-sql = """SELECT temp_gradient FROM site_info where leg = '{}' and site = '{}';""".format(Leg, Site)
+sql = """SELECT temp_gradient
+FROM site_info
+where leg = '{}' and site = '{}';""".format(Leg, Site)
 temp_gradient = pd.read_sql(sql, con)
 temp_gradient = temp_gradient.iloc[0,0]
 
@@ -113,7 +125,9 @@ water_depth = pd.read_sql(sql, con)
 water_depth = water_depth.iloc[0,0]
 
 # Bottom water temp (degrees C)
-sql = """SELECT bottom_water_temp FROM site_info where leg = '{}' and site = '{}';""".format(Leg, Site)
+sql = """SELECT bottom_water_temp
+FROM site_info
+where leg = '{}' and site = '{}';""".format(Leg, Site)
 bottom_temp = pd.read_sql(sql, con)
 if bottom_temp.iloc[0,0] == None:
     if water_depth >= 1500:
@@ -124,6 +138,7 @@ if bottom_temp.iloc[0,0] == None:
         bottom_temp_est = 'shallow'
 else:
     bottom_temp = bottom_temp.iloc[0,0]
+    bottom_temp_est = 'na'
 
 # Temperature profile (degrees C)
 def sedtemp(z, bottom_temp):
@@ -133,12 +148,18 @@ def sedtemp(z, bottom_temp):
         return bottom_temp + np.multiply(z, temp_gradient)
 
 # Advection rate (m/y)
-sql = """SELECT advection_rate FROM site_info where leg = '{}' and site = '{}';""".format(Leg, Site)
+sql = """SELECT advection_rate
+FROM site_info
+where leg = '{}' and site = '{}';""".format(Leg, Site)
 advection = pd.read_sql(sql, con)
 advection = advection.iloc[0,0]
+if advection == None:
+    advection = 0
 
 # Sedimentation rate profile (m/y) (Calculated in age_depth.py)
-sql = """SELECT sedrate_ages, sedrate_depths FROM metadata_sed_rate where leg = '{}' and site = '{}' ; """.format(Leg, Site)
+sql = """SELECT sedrate_ages, sedrate_depths
+FROM metadata_sed_rate
+where leg = '{}' and site = '{}' ; """.format(Leg, Site)
 sedratedata = pd.read_sql(sql, con)
 sedratedata = sedratedata.sort_values(by='sedrate_depths')
 
@@ -151,13 +172,17 @@ sedrate = sedrates[0]  # Using modern sedimentation rate
 print('Modern sed rate (cm/ky):', np.round(sedrate*100000, decimals=3))
 
 # Load age-depth data for plots
-sql = """SELECT depth, age FROM age_depth where leg = '{}' and site = '{}' order by 1 ;""".format(Leg, Site)
+sql = """SELECT depth, age
+FROM age_depth
+where leg = '{}' and site = '{}' order by 1 ;""".format(Leg, Site)
 picks = pd.read_sql(sql, con)
 picks = picks.as_matrix()
 picks = picks[np.argsort(picks[:,0])]
 
 # Age-Depth boundaries from database used in this run
-sql = """SELECT age_depth_boundaries FROM metadata_sed_rate where leg = '{}' and site = '{}' order by 1 ;""".format(Leg, Site)
+sql = """SELECT age_depth_boundaries
+FROM metadata_sed_rate
+where leg = '{}' and site = '{}' order by 1 ;""".format(Leg, Site)
 age_depth_boundaries = pd.read_sql(sql, con).iloc[0,0] # Indices when sorted by age
 
 ###############################################################################

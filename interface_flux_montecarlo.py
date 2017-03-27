@@ -12,7 +12,7 @@ import MySQLdb
 import matplotlib.pyplot as plt
 from pylab import savefig
 from matplotlib import mlab
-from interface_flux import Precision, concunique, dp, pordepth, porfit, porvalues, seddepths, sedtimes, TempD, bottom_temp, bottom_temp_est, z, advection, Leg, Site, Solute_db, porcurve, Dstp
+from interface_flux import Precision, concunique, bottom_temp_est, dp, pordepth, porfit, porvalues, seddepths, sedtimes, TempD, bottom_temp, z, advection, Leg, Site, Solute_db, porcurve, Dstp
 
 cycles = 5000  # Monte Carlo simulations
 
@@ -31,11 +31,13 @@ por_offsets = np.random.normal(scale=por_error, size=(cycles, len(porvalues)))
 # Bottom water temperature offsets
 if bottom_temp_est == 'deep':
     temp_error = 0.9
+    temp_offsets = np.random.normal(scale=temp_error, size=cycles)
 elif bottom_temp_est == 'shallow':
     temp_error = 4.2
+    temp_offsets = np.random.normal(scale=temp_error, size=cycles)
 else:
     temp_error = 0
-temp_offsets = np.random.normal(scale=temp_error, size=cycles)
+    temp_offsets = np.zeros(cycles)
 
 '''
 # Concentration offsets - truncate error at 1-sigma of gaussian distribution
@@ -69,9 +71,6 @@ portop_rand = np.add(portop, por_offsets[:,0])
 portop_rand[portop_rand > 0.90] = 0.90
 for n in range(cycles):
     portop_rand[portop_rand < por_rand[n,-1]] = por_rand[n,-1]
-
-# Randomized bottom_water_temp
-
 
 # Define curve fit functions for Monte Carlo Method
 def conc_curve_mc(z, a):

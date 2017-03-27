@@ -383,6 +383,17 @@ for i in np.arange(np.size(metadata, axis=0)):
     por_error = rmse(porcurve(pordepth, porfit), porvalues)
     por_offsets = np.random.normal(scale=por_error, size=(cycles, len(porvalues)))
 
+    # Bottom water temperature offsets
+    if bottom_temp_est == 'deep':
+        temp_error = 0.9
+        temp_offsets = np.random.normal(scale=temp_error, size=cycles)
+    elif bottom_temp_est == 'shallow':
+        temp_error = 4.2
+        temp_offsets = np.random.normal(scale=temp_error, size=cycles)
+    else:
+        temp_error = 0
+        temp_offsets = np.zeros(cycles)
+
     '''
     # Concentration offsets - truncate error at 1-sigma of gaussian distribution
     i=0
@@ -458,7 +469,10 @@ for i in np.arange(np.size(metadata, axis=0)):
 
 
     tortuosity_rand = 1-np.log(portop_rand**2)
-    Dsed_rand = Dstp(TempD, bottom_temp)/tortuosity_rand
+    bottom_temp_rand = bottom_temp+temp_offsets
+    bottom_temp_rand[bottom_temp_rand < -2] = -2
+
+    Dsed_rand = Dstp(TempD, bottom_temp_rand)/tortuosity_rand
 
 
     # Plot all the monte carlo runs
