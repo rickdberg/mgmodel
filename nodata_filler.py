@@ -10,64 +10,57 @@ import pandas as pd
 import netCDF4 as ncdf
 from sqlalchemy import create_engine
 from osgeo import gdal
-import rasterio
 
 engine = create_engine("mysql://root:neogene227@localhost/iodp_compiled")
 gdal.UseExceptions()
 
-# Load metadata
-sql = "SELECT * FROM metadata_mg_flux;"
-metadata = pd.read_sql(sql, engine)
 
-# Load site data
-sql = "SELECT * FROM site_info;"
-sitedata = pd.read_sql(sql, engine)
-
-# Load hole data
-sql = "SELECT * FROM summary_all;"
-holedata = pd.read_sql(sql, engine)
-# Group and average hole data for sites
-hole_grouped = holedata.loc[:,('site_key', 'lat','lon','water_depth','total_penetration')].groupby("site_key").mean().reset_index()
-
-# Combine all tables
-site_meta_data = pd.merge(metadata, sitedata, how='outer', on=('site_key', 'leg', 'site'))
-data = pd.merge(site_meta_data, hole_grouped, how='outer', on=('site_key')).fillna(np.nan)
-data = data.dropna(subset = ['interface_flux']).reset_index(drop=True)
-
-# Get site lat and lon values
-site_lat = data['lat']
-site_lon = data['lon']
-
+# Using scipy
 # Load porosity data - not filled
 f = ncdf.Dataset(
 r"C:\Users\rickdberg\Documents\UW Projects\Magnesium uptake\Data\ML Inputs\Martin - porosity productivity distances\grl53425-sup-0002-supinfo.grd"
 , "r")
-lat = f.variables['y'][:]
-lon = f.variables['x'][:]
+y = f.variables['y'][:]  # lat
+x = f.variables['x'][:]  # lon
 z = f.variables['z'][:]
 f.close()
 
+# Get into Pandas
+porosities  = pd.DataFrame(z.data, columns=x.data, index=y.data)
+lat = pd.Series(y)
+lon = pd.Series(x)
 
+# Fill unknown porosity values with NaN
+porosities = porosities.fillna(np.nan)
 
-
-# Using scipy
-coords = np.array([]).reshape(0,2)
+# Restructure lat lon data for iterpolation function - not working yet - very slow
+coords = pd.DataFrame()
 for n in np.arange(len(lat)):
-    stack = np.column_stack((np.ones(len(lon))*lat[n], lon))
-    coords = np.vstack((coords, stack))
-values = np.array([]).reshape(0,1)
+    stack = pd.concat((pd.Series(np.ones(len(lon))*lat[n]), lon), axis=1)
+    coords = pd.concat((coords, stack), axis=0)
+values = pd.Series()
 for n in np.arange(len(lat)):
-    values = np.concatenate((values, z[n,:]), axis=1)
-
-zz = z[0,:]
+    values = pd.concat((values, z.iloc[n,:]), axis=0)
 
 
+
+
+
+
+# This is just an example of how this function works
 grid_x, grid_y = np.mgrid[0:1:100j, 0:1:200j]
 points = np.random.rand(1000, 2)
 def func(x, y):
     return x*(1-x)*np.cos(4*np.pi*x) * np.sin(4*np.pi*y**2)**2
 values = func(points[:,0], points[:,1])
 porosities_filled = scipy.interpolate.griddata(points, values, xi, method='linear', fill_value=nan, rescale=False)
+
+
+
+
+
+
+
 
 
 
