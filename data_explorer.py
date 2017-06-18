@@ -6,52 +6,45 @@ Created on Fri Mar 10 12:42:04 2017
 
 Data explorer
 
+['etopo1_depth', 'surface_porosity', 'sed_thickness', 'crustal_age',
+                'coast_distance', 'ridge_distance', 'seamount', 'surface_productivity',
+                'toc', 'opal', 'caco3', 'woa_temp', 'woa_salinity', 'woa_o2',
+                'lith1','lith2','lith3','lith4','lith5','lith6','lith7','lith8',
+                'lith9','lith10','lith11','lith12','lith13']
+
 """
-import pandas as pd
 import numpy as np
-from sqlalchemy import create_engine
 import matplotlib.pyplot as plt
+from site_metadata_compiler_completed import comp
 
-engine = create_engine("mysql://root:neogene227@localhost/iodp_compiled")
-
-# Load metadata
-sql = "SELECT * FROM metadata_mg_flux;"
-metadata = pd.read_sql(sql, engine)
+database = "mysql://root:neogene227@localhost/iodp_compiled"
+metadata = "metadata_mg_flux"
+site_info = "site_info"
+hole_info = "summary_all"
 
 # Load site data
-sql = "SELECT * FROM site_info;"
-sitedata = pd.read_sql(sql, engine)
+data = comp(database, metadata, site_info, hole_info)
 
-# Load hole data
-sql = "SELECT * FROM summary_all;"
-holedata = pd.read_sql(sql, engine)
-holedata = holedata[holedata['leg'] != '161']
-holedata = holedata[holedata['leg'] != '160']
-
-# Group and average hole data for sites
-hole_grouped = holedata.loc[:,('site_key', 'lat','lon','water_depth','total_penetration')].groupby("site_key").mean().reset_index()
-
-# Combine all tables
-site_meta_data = pd.merge(metadata, sitedata, how='outer', on=('site_key', 'leg', 'site'))
-data = pd.merge(site_meta_data, hole_grouped, how='outer', on=('site_key')).fillna(np.nan)
 
 # Geographic patterns
-plt.scatter(data['lon'], data['lat'], c=data['bottom_temp'], s=data['water_depth'].astype(float)/10)
+plt.scatter(data['lon'], data['lat'],
+            c=data['burial_flux'], s=data['sed_rate'].astype(float)*1000000)
 plt.xlim((-180,180))
 plt.ylim((-90,90))
 
 # Direct comparison
-plt.scatter(ml_data['interface_flux'].astype(float), ml_data['opal'].astype(float), s= 100, c=data['water_depth'].astype(float))
+plt.scatter(data['sed_rate_combined'].astype(float),
+            data['sed_rate'].astype(float), s= 100,
+            c='b')
 # plt.xlim((-10,0))
-plt.ylim((0,1))
+# plt.ylim((0,1))
 plt.show()
 
 # Histogram
-d = ml_data['depth'].astype(float)
-d.hist(bins=50)
+d = data['interface_flux'].astype(float)
+h = d.hist(bins=50)
+h.set_ylabel('$Count$', fontsize=20)
+h.set_xlabel('$Mg\ Flux\ (mol\ m^{-2}\ y^{-1})$', fontsize=20)
 
-
-'depth', 'porosities', 'sed_thickness', 'crustal_age', 'coast_distance',
-'ridge_distance', 'seamount', 'productivity', 'toc', 'caco3', 'opal'
-
+median_stdev = np.nanmedian(data['stdev_flux'].astype(float)/data['interface_flux'].astype(float)*100)
 # eof

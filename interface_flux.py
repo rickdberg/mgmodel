@@ -11,7 +11,7 @@ Positive flux is downward (into the sediment)
 """
 import numpy as np
 import pandas as pd
-from scipy import optimize, integrate, stats
+from scipy import optimize, integrate
 import MySQLdb
 import os
 import datetime
@@ -21,20 +21,23 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from mpl_toolkits.axes_grid1.inset_locator import mark_inset
 from pylab import savefig
 from collections import defaultdict
+from site_metadata_compiler import metadata_compiler
+import seawater
+
 
 Script = os.path.basename(__file__)
 Date = datetime.datetime.now()
 
 # Site Information
-Leg = '339'
-Site = 'U1390'
-Holes = "('A') or hole is null"
+Leg = '172'
+Site = '1062'
+Holes = "('A','B') or hole is null"
 Hole = ''.join(filter(str.isupper, filter(str.isalpha, Holes)))  # Formatting for saving in metadata
 Comments = ''
 Complete = ''
 
 # Species parameters
-Solute = 'Mg_ic'  # Change to Mg_ic if needed, based on what's available in database
+Solute = 'Mg'  # Change to Mg_ic if needed, based on what's available in database
 Ds = 1.875*10**-2  # m^2 per year free diffusion coefficient at 18C (ref?)
 TempD = 18  # Temperature at which diffusion coefficient is known
 Precision = 0.02  # measurement precision
@@ -42,7 +45,7 @@ Ocean = 54  # Concentration in modern ocean (mM)
 Solute_db = 'Mg' # Label for the database loading
 
 # Model parameters
-dp = 6 # Number of concentration datapoints to use for exponential curve fit
+dp = 20 # Number of concentration datapoints to use for exponential curve fit
 z = 0  # Depth (meters) at which to calculate flux
 
 ###############################################################################
@@ -51,6 +54,7 @@ z = 0  # Depth (meters) at which to calculate flux
 # Load data from database
 
 # Connect to database
+database = "mysql://root:neogene227@localhost/iodp_compiled"
 user = 'root'
 passwd = 'neogene227'
 host = '127.0.0.1'
@@ -59,6 +63,42 @@ conctable = 'iw_all'
 portable = 'mad_all'
 con = MySQLdb.connect(user=user, passwd=passwd, host=host, db=db)
 cursor = con.cursor()
+metadata = "metadata_mg_flux"
+site_info = "site_info"
+hole_info = "summary_all"
+
+# Get site metadata
+site_metadata = metadata_compiler(database, metadata, site_info, hole_info, Leg, Site)
+
+# Temperature gradient (degrees C/m)
+temp_gradient = site_metadata['temp_gradient'][0]
+
+# Water depth for bottom water estimation
+water_depth = site_metadata['water_depth'][0]
+
+# Bottom water temp (degrees C)
+if site_metadata['bottom_water_temp'].isnull().all():
+    bottom_temp = site_metadata['woa_bottom_temp'][0]
+    if water_depth >= 1500:
+        bottom_temp_est = 'deep'
+    else:
+        bottom_temp_est = 'shallow'
+else:
+    bottom_temp = site_metadata['bottom_water_temp'][0]
+    bottom_temp_est = 'na'
+
+# Temperature profile (degrees C)
+def sedtemp(z, bottom_temp):
+    if z.all() == 0:
+        return bottom_temp*np.ones(len(z))
+    else:
+        return bottom_temp + np.multiply(z, temp_gradient)
+
+# Advection rate (m/y)
+advection = float(site_metadata['advection'][0])
+if pd.isnull(advection):
+    advection = 0
+
 
 # Pore water chemistry data
 sql = """SELECT sample_depth, {}
@@ -69,31 +109,13 @@ concdata = pd.read_sql(sql, con)
 concdata = concdata.sort_values(by='sample_depth')
 concdata = concdata.as_matrix()
 
-# Bottom water concentration Cl. Take first available of titration value <10 mbsf, then IC, then IAPSO.
-sql = """SELECT sample_depth, Cl
-FROM {}
-where leg = '{}' and site = '{}' and (hole in {})
-and Cl is not null
-and sample_depth > 0.05 and sample_depth < 10
-; """.format(conctable, Leg, Site, Holes)
-cl_data = pd.read_sql(sql, con)
-cl_data = cl_data.fillna(np.nan).sort_values(by='sample_depth')
-if cl_data.iloc[:,1].isnull().all():
-    sql = """SELECT sample_depth, Cl_ic
-    FROM {}
-    where leg = '{}' and site = '{}' and (hole in {})
-    and Cl is not null
-    and sample_depth > 0.05 and sample_depth < 10
-    ; """.format(conctable, Leg, Site, Holes)
-    cl_ic_data = pd.read_sql(sql, con)
-    cl_ic_data = cl_ic_data.fillna(np.nan).sort_values(by='sample_depth')
-    if cl_ic_data.iloc[:,1].isnull().all():
-        cl_bottom_water = 558
-    else:
-        cl_bottom_water = stats.nanmean(cl_ic_data.iloc[0,2])
-else:
-    cl_bottom_water = stats.nanmean(cl_data.iloc[0,1])
-bottom_conc = Ocean/558*cl_bottom_water  # Solute normalized to Cl in top three iw measurements from site
+# Bottom water concentration of Mg based on WOA bottom salinities.
+woa_salinity = site_metadata['woa_bottom_salinity'][0]
+density = seawater.eos80.dens0(woa_salinity, bottom_temp)
+def sal_to_cl(salinity, density):
+    return (1000*(salinity-0.03)*density/1000)/(1.805*35.45)
+woa_cl = sal_to_cl(woa_salinity, density)
+bottom_conc=woa_cl/558*Ocean
 ct0 = [bottom_conc]  # mol per m^3 in modern seawater at specific site
 
 # Porosity data
@@ -112,49 +134,6 @@ if pordata.iloc[:,1].count() < 40:  # If not enough data from method C, take all
     pordata = pd.concat((pordata, pordata_b), axis=0)
 pordata = pordata.as_matrix()
 
-# Temperature gradient (degrees C/m)
-sql = """SELECT temp_gradient
-FROM site_info
-where leg = '{}' and site = '{}';""".format(Leg, Site)
-temp_gradient = pd.read_sql(sql, con)
-temp_gradient = temp_gradient.iloc[0,0]
-
-# Water depth for bottom water estimation
-sql = "SELECT avg(water_depth) FROM summary_all WHERE leg = '{}' and site = '{}';""".format(Leg, Site)
-water_depth = pd.read_sql(sql, con)
-water_depth = water_depth.iloc[0,0]
-
-# Bottom water temp (degrees C)
-sql = """SELECT bottom_water_temp
-FROM site_info
-where leg = '{}' and site = '{}';""".format(Leg, Site)
-bottom_temp = pd.read_sql(sql, con)
-if bottom_temp.iloc[0,0] == None:
-    if water_depth >= 1500:
-        bottom_temp = 1.9
-        bottom_temp_est = 'deep'
-    else:
-        bottom_temp = -0.01168*water_depth+16.629  # Empirical equation from available bottom_water_temp-depth data
-        bottom_temp_est = 'shallow'
-else:
-    bottom_temp = bottom_temp.iloc[0,0]
-    bottom_temp_est = 'na'
-
-# Temperature profile (degrees C)
-def sedtemp(z, bottom_temp):
-    if z.all() == 0:
-        return bottom_temp*np.ones(len(z))
-    else:
-        return bottom_temp + np.multiply(z, temp_gradient)
-
-# Advection rate (m/y)
-sql = """SELECT advection_rate
-FROM site_info
-where leg = '{}' and site = '{}';""".format(Leg, Site)
-advection = pd.read_sql(sql, con)
-advection = advection.iloc[0,0]
-if advection == None:
-    advection = 0
 
 # Sedimentation rate profile (m/y) (Calculated in age_depth.py)
 sql = """SELECT sedrate_ages, sedrate_depths
@@ -212,9 +191,16 @@ if concunique[0,0] > 0.05:
 
 # Fit exponential curve to concentration datapoints (specified as "dp")
 def conc_curve(z, a):
-    return (concunique[0,1]-concunique[dp-1,1]) * np.exp(np.multiply(np.multiply(-1, a), z)) + concunique[dp-1,1]
+    return concunique[0,1] * np.exp(np.multiply(a, z))  # a = (v - sqrt(v**2 * 4Dk))/2D
 
-conc_fit, conc_cov = optimize.curve_fit(conc_curve, concunique[:dp,0], concunique[:dp,1], p0=0.01)
+
+'''def conc_curve(z, a, b, k):
+    return a*np.sin(np.sqrt(k)*z)+b*np.cos(np.sqrt(k)*z)
+'''
+'''def conc_curve(z, a):
+    return (concunique[0,1]-concunique[dp-1,1]) * np.exp(np.multiply(np.multiply(-1, a), z)) + concunique[dp-1,1]
+'''
+conc_fit, conc_cov = optimize.curve_fit(conc_curve, concunique[:dp,0], concunique[:dp,1], p0=[1])
 conc_fit = conc_fit[0]
 # conc_interp_depths = np.arange(0,3,intervalthickness)  # Three equally-spaced points
 # conc_interp_fit = conc_curve(conc_interp_depths, conc_fit)  # To be used if Boudreau method for conc gradient is used
@@ -297,9 +283,10 @@ pwburialflux = deeppor*sedmassrate/deepsolid
 ###############################################################################
 # Flux model
 
-#  gradient = (-3*conc_interp_fit[0] + 4*conc_interp_fit[1] - conc_interp_fit[2])/(2*intervalthickness)  # Approximation according to Boudreau 1997 Diagenetic Models and Their Implementation. Matches well with derivative method
+# gradient = (-3*conc_interp_fit[0] + 4*conc_interp_fit[1] - conc_interp_fit[2])/(2*intervalthickness)  # Approximation according to Boudreau 1997 Diagenetic Models and Their Implementation. Matches well with derivative method
 a = conc_fit
-gradient = (concunique[0, 1] - concunique[dp-1, 1]) * -a * np.exp(-a * z)  # Derivative of conc_curve @ z
+gradient = concunique[0, 1] * a * np.exp(np.multiply(a, z))
+# gradient = (concunique[0, 1] - concunique[dp-1, 1]) * -a * np.exp(-a * z)  # Derivative of conc_curve @ z
 burial_flux = pwburialflux * conc_curve(z, conc_fit)
 flux = porosity * Dsed * -gradient + (porosity * advection + pwburialflux) * conc_curve(z, conc_fit)
 print('Flux (mol/m^2 y^-1):', flux)

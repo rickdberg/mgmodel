@@ -70,5 +70,5 @@ plt.plot(slope*y+intercept, y, 'k-')
 # Plot histogram of results
 plt.hist(deep_data['bottom_water_temp'], normed=1, bins=30, facecolor='orange')
 
-
+plt.show()
 # eof

@@ -5,6 +5,8 @@
 Monte Carlo Simulation for interface flux model
 Must run interface_flux model before running this script
 
+Fit is introducing structure that isn't in the data
+
 """
 import numpy as np
 from scipy import optimize, integrate, stats
@@ -16,9 +18,6 @@ from interface_flux import Precision, concunique, bottom_temp_est, dp, pordepth,
 
 cycles = 5000  # Monte Carlo simulations
 
-# Concentration offsets - using full gaussian probability
-relativeerror = Precision
-conc_offsets = np.random.normal(scale=relativeerror, size=(cycles, len(concunique[:dp,1])))
 
 # Error calculated as relative root mean squared error of curve fit to reported values
 def rmse(model_values, measured_values):
@@ -27,6 +26,23 @@ def rmse(model_values, measured_values):
 # Porosity offsets - using full gaussian probability
 por_error = rmse(porcurve(pordepth, porfit), porvalues)
 por_offsets = np.random.normal(scale=por_error, size=(cycles, len(porvalues)))
+
+# Get randomized porosity matrix (within realistic ranges between 30% and 90%)
+por_rand = np.add(porcurve(pordepth, porfit), por_offsets)
+por_rand[por_rand > 0.90] = 0.90
+por_rand[por_rand < 0.30] = 0.30
+
+portop = np.max(porvalues[:3])
+portop_rand = np.add(portop, por_offsets[:,0])
+portop_rand = portop_rand[portop_rand > porcurve(pordepth, porfit)[-1]]
+portop_rand = portop_rand[portop_rand < 0.90]
+
+cycles = len(portop_rand)
+por_rand = por_rand[:cycles,:]
+
+# Concentration offsets - using full gaussian probability
+relativeerror = Precision
+conc_offsets = np.random.normal(scale=relativeerror, size=(cycles, len(concunique[:dp,1])))
 
 # Bottom water temperature offsets
 if bottom_temp_est == 'deep':
@@ -40,7 +56,7 @@ else:
     temp_offsets = np.zeros(cycles)
 
 '''
-# Concentration offsets - truncate error at 1-sigma of gaussian distribution
+# Concentration offsets - truncate error at 2-sigma of gaussian distribution
 i=0
 offsets = []
 while i < cycles:
@@ -61,20 +77,9 @@ while i < cycles:
 conc_rand = np.add(concunique[:dp,1], np.multiply(conc_offsets, concunique[:dp,1]))
 conc_rand[conc_rand < 0] = 0
 
-# Get randomized porosity matrix (within realistic ranges between 30% and 90%)
-por_rand = np.add(porcurve(pordepth, porfit), por_offsets)
-por_rand[por_rand > 0.90] = 0.90
-por_rand[por_rand < 0.30] = 0.30
-
-portop = np.max(porvalues[:3])
-portop_rand = np.add(portop, por_offsets[:,0])
-portop_rand[portop_rand > 0.90] = 0.90
-for n in range(cycles):
-    portop_rand[portop_rand < por_rand[n,-1]] = por_rand[n,-1]
-
 # Define curve fit functions for Monte Carlo Method
 def conc_curve_mc(z, a):
-    return (conc_rand[n,0]-conc_rand[n,-1]) * np.exp(np.multiply(np.multiply(-1, a), z)) + conc_rand[n,-1]
+    return concunique[0,1] * np.exp(np.multiply(a, z))  # a = (v - sqrt(v**2 * 4Dk))/2D
 
 def por_curve_mc(z, a):
     portop = np.max(por_rand[n,:3])  # Greatest of top 3 porosity measurements for upper porosity boundary
@@ -108,7 +113,7 @@ for n in range(cycles):
 
 # Pore water burial flux
 sedmassrate = sectionmasses/np.diff(sedtimes)[0]
-deeppor = np.mean(por_rand[:,-3:])
+deeppor = np.mean(por_rand[:,-3:], axis=1)
 deepsolid = 1 - deeppor
 pwburialflux = deeppor*sedmassrate/deepsolid
 
