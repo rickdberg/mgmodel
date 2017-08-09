@@ -30,8 +30,8 @@ Date = datetime.datetime.now()
 
 # Site Information
 Leg = '172'
-Site = '1062'
-Holes = "('A','B') or hole is null"
+Site = '1063'
+Holes = "('A') or hole is null"
 Hole = ''.join(filter(str.isupper, filter(str.isalpha, Holes)))  # Formatting for saving in metadata
 Comments = ''
 Complete = ''
@@ -45,7 +45,7 @@ Ocean = 54  # Concentration in modern ocean (mM)
 Solute_db = 'Mg' # Label for the database loading
 
 # Model parameters
-dp = 20 # Number of concentration datapoints to use for exponential curve fit
+dp = 23 # Number of concentration datapoints to use for exponential curve fit
 z = 0  # Depth (meters) at which to calculate flux
 
 ###############################################################################
@@ -78,7 +78,7 @@ water_depth = site_metadata['water_depth'][0]
 
 # Bottom water temp (degrees C)
 if site_metadata['bottom_water_temp'].isnull().all():
-    bottom_temp = site_metadata['woa_bottom_temp'][0]
+    bottom_temp = site_metadata['woa_temp'][0]
     if water_depth >= 1500:
         bottom_temp_est = 'deep'
     else:
@@ -110,7 +110,7 @@ concdata = concdata.sort_values(by='sample_depth')
 concdata = concdata.as_matrix()
 
 # Bottom water concentration of Mg based on WOA bottom salinities.
-woa_salinity = site_metadata['woa_bottom_salinity'][0]
+woa_salinity = site_metadata['woa_salinity'][0]
 density = seawater.eos80.dens0(woa_salinity, bottom_temp)
 def sal_to_cl(salinity, density):
     return (1000*(salinity-0.03)*density/1000)/(1.805*35.45)

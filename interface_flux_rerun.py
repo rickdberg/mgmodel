@@ -137,10 +137,10 @@ for i in np.arange(np.size(metadata, axis=0)):
 
     # Temperature profile (degrees C)
     def sedtemp(z, bottom_temp):
-    if z.all() == 0:
-        return bottom_temp*np.ones(len(z))
-    else:
-        return bottom_temp + np.multiply(z, temp_gradient)
+        if z.all() == 0:
+            return bottom_temp*np.ones(len(z))
+        else:
+            return bottom_temp + np.multiply(z, temp_gradient)
 
     # Advection rate (m/y)
     sql = """SELECT advection_rate FROM site_info where leg = '{}' and site = '{}';""".format(Leg, Site)
